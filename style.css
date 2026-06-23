@@ -1,0 +1,91 @@
+/* 🌧️ 테마 생성기 — panel styles (scoped) */
+@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital@0;1&family=Cinzel&family=Marcellus&family=Orbitron&family=Rajdhani&family=Nanum+Myeongjo&family=Noto+Sans+KR:wght@400;600&display=swap');
+
+#theme-gen-panel {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(560px, 94vw); max-height: 88vh; overflow-y: auto;
+  background: #f8f4ec; color: #463d33; z-index: 10000;
+  border: 1px solid #e0d8c8; border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.45);
+  font-family: ui-monospace, Menlo, monospace; font-size: 13px;
+  -webkit-overflow-scrolling: touch;
+}
+#theme-gen-panel.tg-hidden { display: none; }
+#tg-panel-inner { padding: 14px 16px 22px; }
+
+#theme-gen-panel .tg-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+#theme-gen-panel .tg-bar b { font-size: 14px; }
+#theme-gen-panel .tg-ver { color: #9a8f7e; font-size: 11px; }
+#theme-gen-panel #tg-close { margin-left: auto; cursor: pointer; color: #9a8f7e; font-size: 16px; padding: 2px 8px; }
+#theme-gen-panel #tg-close:hover { color: #463d33; }
+
+#theme-gen-panel .tg-label { font-size: 11px; color: #9a8f7e; margin: 16px 2px 7px; letter-spacing: .03em; }
+#theme-gen-panel .tg-label .count { color: #8aa56f; }
+
+#theme-gen-panel .tg-sw { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; margin: 6px 0; }
+#theme-gen-panel .tg-sw input { display: none; }
+#theme-gen-panel .tg-track { width: 34px; height: 19px; border-radius: 10px; background: #ddd5c5; position: relative; transition: background .15s; flex: 0 0 auto; }
+#theme-gen-panel .tg-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #b8ad99; transition: transform .15s; }
+#theme-gen-panel .tg-sw input:checked + .tg-track { background: #8aa56f; }
+#theme-gen-panel .tg-sw input:checked + .tg-track::after { transform: translateX(15px); background: #fffdf8; }
+#theme-gen-panel .tg-sw span:last-child { font-size: 12px; color: #6b6253; }
+
+#theme-gen-panel .tg-airow { display: flex; gap: 8px; margin-bottom: 8px; }
+#theme-gen-panel .tg-airow.tg-hidden { display: none; }
+#theme-gen-panel #tg-mood { flex: 1 1 auto; min-width: 0; background: #fffdf8; border: 1px solid #e0d8c8; color: #463d33; padding: 9px 11px; border-radius: 8px; font-family: inherit; font-size: 13px; }
+#theme-gen-panel #tg-extract, #theme-gen-panel .tg-primary { background: #8aa56f; border: 0; color: #14180f; font-weight: 700; padding: 0 16px; border-radius: 8px; font-family: inherit; font-size: 13px; cursor: pointer; }
+
+#theme-gen-panel .tg-pills { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 5px; }
+#theme-gen-panel .tg-pills::-webkit-scrollbar { height: 0; }
+#theme-gen-panel .tg-pill { flex: 0 0 auto; background: #fffdf8; border: 1px solid #e0d8c8; color: #463d33; border-radius: 20px; padding: 6px 12px; font-family: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+#theme-gen-panel .tg-pill:hover { border-color: #8aa56f; }
+
+#theme-gen-panel .tg-axis { margin-bottom: 12px; }
+#theme-gen-panel .tg-ends { display: flex; justify-content: space-between; font-size: 11px; color: #9a8f7e; margin-bottom: 4px; }
+#theme-gen-panel .tg-ends .on { color: #8aa56f; }
+#theme-gen-panel input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; background: #e0d8c8; border-radius: 3px; outline: none; margin: 0; }
+#theme-gen-panel input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #8aa56f; cursor: pointer; }
+#theme-gen-panel input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border: 0; border-radius: 50%; background: #8aa56f; cursor: pointer; }
+
+#theme-gen-panel .tg-status { color: #9a8f7e; font-size: 12px; min-height: 18px; margin: 8px 2px; }
+
+#theme-gen-panel .tg-preview { border-radius: 10px; overflow: hidden; margin-bottom: 12px; font-family: -apple-system, "Noto Sans KR", sans-serif; }
+#theme-gen-panel .tg-mes { padding: 12px 14px; }
+#theme-gen-panel .tg-name { font-weight: 600; font-size: 14px; }
+#theme-gen-panel .tg-time { font-size: 11px; opacity: .6; }
+#theme-gen-panel .tg-div { height: 1px; margin: 8px 0 10px; }
+#theme-gen-panel .tg-body p { margin: 0 0 10px; font-size: 14px; line-height: 1.6; }
+#theme-gen-panel .tg-body p:last-child { margin: 0; }
+#theme-gen-panel .tg-em { font-style: italic; }
+#theme-gen-panel .tg-u { text-decoration: underline; }
+#theme-gen-panel .tg-q { display: inline-block; padding: 2px 10px; border-radius: 7px; }
+
+#theme-gen-panel .tg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+@media (max-width: 480px) { #theme-gen-panel .tg-grid { grid-template-columns: 1fr; } }
+#theme-gen-panel .tg-swatch { display: flex; align-items: center; gap: 9px; background: #fffdf8; border: 1px solid #e8e0d2; border-radius: 8px; padding: 7px 9px; }
+#theme-gen-panel .tg-swatch.tg-custom { border-style: dashed; }
+#theme-gen-panel .tg-sep { grid-column: 1/-1; font-size: 10.5px; color: #9a8f7e; margin: 5px 2px 1px; }
+#theme-gen-panel .tg-chip { width: 38px; height: 28px; flex: 0 0 auto; border-radius: 5px; border: 1px solid rgba(0,0,0,.12); position: relative; overflow: hidden; background-image: linear-gradient(45deg,#ddd6c8 25%,transparent 25%,transparent 75%,#ddd6c8 75%),linear-gradient(45deg,#ddd6c8 25%,#f0ebe0 25%,#f0ebe0 75%,#ddd6c8 75%); background-size: 9px 9px; background-position: 0 0,4.5px 4.5px; }
+#theme-gen-panel .tg-chip i { position: absolute; inset: 0; }
+#theme-gen-panel input[type=color].tg-chipc { -webkit-appearance: none; appearance: none; width: 38px; height: 28px; flex: 0 0 auto; border: 1px solid rgba(0,0,0,.15); border-radius: 5px; padding: 0; background: none; cursor: pointer; }
+#theme-gen-panel input[type=color].tg-chipc::-webkit-color-swatch-wrapper { padding: 0; }
+#theme-gen-panel input[type=color].tg-chipc::-webkit-color-swatch { border: none; border-radius: 4px; }
+#theme-gen-panel .tg-meta { min-width: 0; flex: 1 1 auto; }
+#theme-gen-panel .tg-role { font-size: 12px; color: #463d33; }
+#theme-gen-panel .tg-val { width: 100%; background: transparent; border: none; border-bottom: 1px solid transparent; color: #9a8f7e; font-family: inherit; font-size: 10.5px; padding: 1px 0; }
+#theme-gen-panel .tg-val:focus { outline: none; border-bottom-color: #8aa56f; color: #463d33; }
+
+#theme-gen-panel .tg-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 14px 0 6px; }
+#theme-gen-panel .tg-actions button { background: transparent; border: 1px solid #e0d8c8; color: #6b6253; padding: 8px 13px; border-radius: 8px; font-family: inherit; font-size: 12.5px; cursor: pointer; }
+#theme-gen-panel .tg-actions .tg-primary { background: #8aa56f; border-color: #8aa56f; color: #14180f; font-weight: 700; }
+#theme-gen-panel .tg-actions button:hover { border-color: #8aa56f; }
+
+#theme-gen-panel .tg-empty { color: #9a8f7e; font-size: 12px; padding: 12px; border: 1px dashed #e0d8c8; border-radius: 8px; text-align: center; }
+#theme-gen-panel .tg-libitem { display: flex; align-items: center; gap: 9px; background: #fffdf8; border: 1px solid #e8e0d2; border-radius: 8px; padding: 8px 9px; margin-bottom: 6px; }
+#theme-gen-panel .tg-strip { display: flex; flex: 0 0 auto; border-radius: 5px; overflow: hidden; border: 1px solid rgba(0,0,0,.1); }
+#theme-gen-panel .tg-strip span { width: 15px; height: 24px; }
+#theme-gen-panel .tg-libname { flex: 1 1 auto; min-width: 0; font-size: 12px; color: #463d33; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#theme-gen-panel .tg-libname small { color: #9a8f7e; }
+#theme-gen-panel .tg-lbtn { background: transparent; border: 0; color: #9a8f7e; font-family: inherit; font-size: 11.5px; cursor: pointer; padding: 5px 7px; border-radius: 6px; flex: 0 0 auto; }
+#theme-gen-panel .tg-lbtn:hover { color: #463d33; background: #f0ebe0; }
+#theme-gen-panel .tg-lbtn.x:hover { color: #c25; }

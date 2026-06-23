@@ -1,0 +1,12 @@
+{
+  "display_name": "🌧️ 테마 생성기 (Theme Generator)",
+  "loading_order": 100,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "syj6527-oss",
+  "version": "0.1.0-beta",
+  "homePage": "https://github.com/syj6527-oss/theme-gen",
+  "auto_update": true
+}

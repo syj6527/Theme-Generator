@@ -131,3 +131,16 @@
 .tg-adv{margin:4px 0 12px;border:1px solid var(--tg-line,#e8e0d2);border-radius:8px;padding:0 11px;}
 .tg-adv summary{cursor:pointer;padding:9px 0;font-size:12px;color:var(--tg-dim,#9a8f7e);}
 .tg-adv .tg-axis{margin:6px 0 12px;}
+
+/* ── v0.3.1: 버튼 피드백 ── */
+.tg-dicerow button, #sc-dice-color, #sc-dice-dist, #sc-build, .tg-objrow button { transition: transform .08s, background .15s, box-shadow .15s; }
+.tg-dicerow button:active, #sc-dice-color:active, #sc-dice-dist:active, #sc-build:active, .tg-objrow button:active { transform: scale(0.94); }
+.tg-pill:active { transform: scale(0.93); }
+@keyframes tg-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+.tg-rolling { animation: tg-spin .5s ease; display: inline-block; }
+.tg-flash { animation: tg-flashbg .5s ease; }
+@keyframes tg-flashbg { 0% { box-shadow: 0 0 0 0 var(--tg-accent,#8aa56f); } 100% { box-shadow: 0 0 0 6px rgba(138,165,111,0); } }
+/* 미리보기가 갱신될 때 살짝 페이드 */
+.tg-preview { transition: background .2s; }
+.tg-pulse { animation: tg-pulse .35s ease; }
+@keyframes tg-pulse { 0% { opacity: .55; } 100% { opacity: 1; } }

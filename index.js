@@ -12,7 +12,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 
 const MODULE = "themeGen";
-const VERSION = "0.3.0-beta";
+const VERSION = "0.3.1-beta";
 
 const defaultSettings = {
   enabled: true,
@@ -208,24 +208,28 @@ async function sceneResolve(useAI) {
   const kws = (sc.keywords || "").split(/[\s,/]+/).filter(Boolean);
   if (useAI && settings().aiInPanel) {
     try {
-      // 1) 장면 생성 (색 금지)
+      const axList = `온도:[차가움,서늘함,중립,따뜻함,뜨거움] 자연광:[새벽,아침,정오,황혼,노을,달빛] 인공조명:[없음,백열등,형광등,네온] 습도:[건조,산뜻,촉촉,습함,축축] 공기:[맑음,안개,먼지,연무,흐림,먹구름] 채도:[무채,저채도,중채도,고채도,형광] 무드:[고요,낭만,몽환,외로움,포근,물기,투명,신비,불안,활기]`;
+      let prompt;
       if (!sc.scene) {
-        const sp = `키워드들이 동시에 존재하는 '하나의 장면'을 1~2문장으로 그려라. 색/hex 언급 절대 금지. 온도·습도·빛·공기·시간대가 느껴지게.
+        // 장면 생성 + 축 분류를 한 번에 (속도 2배)
+        prompt = `키워드들이 동시에 존재하는 '하나의 장면'을 1~2문장으로 그리고, 그 장면을 7개 축으로 분류해라. 색/hex 언급 절대 금지.
+각 축에서 정확히 하나(무드는 1~2개) 선택. 키워드 중 '포인트색'으로 쓸 단어 하나(point).
 키워드: ${kws.join(", ")}
-장면만 출력(따옴표 없이):`;
-        sc.scene = String(await callAI(sp)).trim().replace(/^["']|["']$/g, "");
-      }
-      // 2) 장면 → 7축 선택
-      const ap = `다음 장면을 7개 축으로 분류해라. 각 축에서 정확히 하나(무드는 1~2개) 골라 JSON만.
-온도:[차가움,서늘함,중립,따뜻함,뜨거움] 자연광:[새벽,아침,정오,황혼,노을,달빛] 인공조명:[없음,백열등,형광등,네온] 습도:[건조,산뜻,촉촉,습함,축축] 공기:[맑음,안개,먼지,연무,흐림,먹구름] 채도:[무채,저채도,중채도,고채도,형광] 무드:[고요,낭만,몽환,외로움,포근,물기,투명,신비,불안,활기]
-또 키워드 중 '포인트색'으로 쓸 단어 하나(point).
+축 후보: ${axList}
+JSON만: {"scene":"장면 1~2문장","온도":"","자연광":"","인공조명":"","습도":"","공기":"","채도":"","무드":[""],"point":""}`;
+      } else {
+        // 유저가 장면 직접 씀 → 축만
+        prompt = `다음 장면을 7개 축으로 분류해라. 각 축 정확히 하나(무드 1~2개). 포인트 단어 하나(point).
+축 후보: ${axList}
 장면: "${sc.scene}"
 JSON만: {"온도":"","자연광":"","인공조명":"","습도":"","공기":"","채도":"","무드":[""],"point":""}`;
-        const t = String(await callAI(ap)); const m = t.match(/\{[\s\S]*\}/);
-        const j = JSON.parse(m ? m[0] : t.replace(/```json|```/g, "").trim());
-        sc.axes = { 온도: j.온도, 자연광: j.자연광, 인공조명: j.인공조명, 습도: j.습도, 공기: j.공기, 채도: j.채도, 무드: Array.isArray(j.무드) ? j.무드 : [j.무드].filter(Boolean) };
-        sc._pointKw = j.point || kws[kws.length - 1] || "";
-        return;
+      }
+      const t = String(await callAI(prompt)); const m = t.match(/\{[\s\S]*\}/);
+      const j = JSON.parse(m ? m[0] : t.replace(/```json|```/g, "").trim());
+      if (j.scene && !sc.scene) sc.scene = String(j.scene).trim().replace(/^["']|["']$/g, "");
+      sc.axes = { 온도: j.온도, 자연광: j.자연광, 인공조명: j.인공조명, 습도: j.습도, 공기: j.공기, 채도: j.채도, 무드: Array.isArray(j.무드) ? j.무드 : [j.무드].filter(Boolean) };
+      sc._pointKw = j.point || kws[kws.length - 1] || "";
+      return;
     } catch (e) { console.warn("[theme-gen] Scene AI 실패, 프리셋 폴백:", e); toast("AI 실패 — 기본 장면으로"); }
   }
   // 폴백: 키워드가 프리셋명에 매칭되면 그걸로, 아니면 첫 키워드 해시로 프리셋 랜덤
@@ -247,16 +251,24 @@ function diceColor() {
   diceDist();
 }
 // 🎲 분배: 색 고정, 배치만 다시
+// 🎲 분배: 역할 재배치 (역할 인덱스만 새로 뽑고 repaint)
 function diceDist() {
   if (!sc.sources.length) return;
-  const harm = harmonizeBand(sc.sources, +(document.getElementById("sc-harm")?.value ?? 80));
+  const harm = harmonizeBand(sc.sources, +(document.getElementById("sc-harm")?.value ?? 60));
   const jit = () => rnd(-0.05, 0.05);
   const idx = harm.map((_, i) => i);
   const bg = idx.slice().sort((a, b) => (harm[b].l + jit()) - (harm[a].l + jit()))[0];
   const txt = idx.slice().sort((a, b) => (harm[a].l + jit()) - (harm[b].l + jit()))[0];
   let ui = idx.find(i => i !== bg && i !== txt); if (ui == null) ui = bg;
   let border = idx.slice().reverse().find(i => i !== bg && i !== txt && i !== ui); if (border == null) border = ui;
-  sc.roleMap = { bg, txt, ui, border, harm };
+  sc.roles = { bg, txt, ui, border };
+  sceneRepaint();
+}
+// 강도/고급 변경 시: 역할 고정, 하모나이즈만 새로 → repaint (슬라이더용)
+function sceneRepaint() {
+  if (!sc.sources.length || !sc.roles) return;
+  const harm = harmonizeBand(sc.sources, +(document.getElementById("sc-harm")?.value ?? 60));
+  sc.roleMap = { ...sc.roles, harm };
   scenePaint();
 }
 // 색 → 12슬롯 배치 + 미리보기
@@ -267,21 +279,22 @@ function scenePaint() {
   const chatBg = H(lightest.h, clamp(lightest.s * 0.5, 0, 0.12), clamp(lightest.l + 0.12, 0.93, 0.985));
   const uiBg = H(uiC.h, clamp(uiC.s * 0.5, 0, 0.14), 0.955);
   const uiBorder = H(borderC.h, clamp(borderC.s * 0.6, 0.08, 0.32), clamp(borderC.l, 0.66, 0.82));
-  const mainText = H(deepest.h, clamp(deepest.s * 0.5, 0.04, 0.20), clamp(deepest.l - 0.2, 0.18, 0.34));
+  // 본문/대사 = 팔레트의 가장 검정에 가까운 색 (deepest hue로 near-black, '깊은말차' 느낌)
+  const mainText = H(deepest.h, clamp(deepest.s * 0.55, 0.06, 0.24), clamp(deepest.l - 0.40, 0.13, 0.22));
   const italicsText = H(point.h, clamp(point.s * 0.7, 0.18, 0.5), clamp(point.l - 0.06, 0.42, 0.62));
   const underlineText = H(borderC.h, clamp(borderC.s * 0.7, 0.1, 0.4), clamp(borderC.l - 0.1, 0.4, 0.58));
   const quoteText = H(212, 0.26, 0.60);
   const hl = makeHL(sc.hl, point, mainText, chatBg);
-  const quoteHighlight = hl.bg, dialogueColor = hl.txt;
+  const quoteHighlight = hl.bg;
+  // 대사 글씨도 본문과 같은 near-black 계열 (Dialogue는 이미 mainText, 그 외엔 본문색으로 통일)
+  const dialogueColor = (sc.hl === "Dialogue") ? mainText : H(deepest.h, clamp(deepest.s * 0.5, 0.06, 0.22), clamp(deepest.l - 0.36, 0.15, 0.26));
   const shadow = "rgba(14,14,18,0.42)";
   const userMesTint = H(point.h, 0.18, 0.95, 0.4);
   const aiMesTint = H(lightest.h, 0.20, 0.97, 0.4);
   let c = { mainText, italicsText, underlineText, quoteText, shadow, chatBg, uiBg, uiBorder, userMesTint, aiMesTint, dialogueColor, quoteHighlight };
-  // 가독성 guard
   let mc = parseColor(c.mainText), b = parseColor(c.chatBg), g = 0;
   while (contrast(mc, b) < 6 && g < 60) { const h = rgbToHsl(mc.r, mc.g, mc.b); mc = { ...hslToRgb(h.h, h.s, Math.max(0, h.l - 0.02)), a: 1 }; g++; }
   c.mainText = toRgba(mc);
-  // 색이름 메타 보존
   sc.names = { chatBg: lightest.name, mainText: deepest.name, italicsText: point.name, uiBorder: borderC.name, point: point.name };
   curName = `🌫️ ${sc.keywords || sc.scene.slice(0, 12)} · ${sc.axes.온도}/${sc.axes.자연광}`;
   const badge = document.getElementById("sc-badge");
@@ -523,8 +536,8 @@ function panelHTML() {
       <div class="tg-sources" id="sc-sources"></div>
 
       <div class="tg-harm">
-        <div class="tg-harmtop"><span>어우러짐 강도</span><span id="sc-harm-v">80</span></div>
-        <input type="range" id="sc-harm" min="0" max="100" value="80">
+        <div class="tg-harmtop"><span>어우러짐 강도</span><span id="sc-harm-v">60</span></div>
+        <input type="range" id="sc-harm" min="0" max="100" value="60">
         <div class="tg-harmend"><span>날것</span><span>한 가족</span></div>
       </div>
 
@@ -594,15 +607,18 @@ function wirePanel() {
 
   // Scene 모드
   const readAdv = () => { sc.adv = { dL: (+p.querySelector("#sc-adv-l").value) / 100, dS: (+p.querySelector("#sc-adv-s").value) / 100, dFant: +p.querySelector("#sc-adv-f").value }; };
-  p.querySelector("#sc-build").addEventListener("click", () => { readAdv(); sceneBuild(); });
-  p.querySelector("#sc-keywords").addEventListener("keydown", e => { if (e.key === "Enter") { readAdv(); sceneBuild(); } });
-  p.querySelector("#sc-dice-scene").addEventListener("click", () => { readAdv(); diceScene(); });
-  p.querySelector("#sc-from-text").addEventListener("click", () => { readAdv(); sceneFromText(); });
-  p.querySelector("#sc-dice-color").addEventListener("click", () => { readAdv(); diceColor(); });
-  p.querySelector("#sc-dice-dist").addEventListener("click", diceDist);
-  p.querySelector("#sc-harm").addEventListener("input", e => { p.querySelector("#sc-harm-v").textContent = e.target.value; if (sc.sources.length) diceDist(); });
-  p.querySelectorAll("#sc-adv-l,#sc-adv-s,#sc-adv-f").forEach(s => s.addEventListener("input", () => { readAdv(); if (sc.axes) diceColor(); }));
-  p.querySelectorAll("[data-scpreset]").forEach(b => b.addEventListener("click", () => { sc.keywords = b.dataset.scpreset; sc.scene = ""; sc.axes = { ...SCENE_PRESET[b.dataset.scpreset] }; sc._pointKw = ""; p.querySelector("#sc-keywords").value = b.dataset.scpreset; readAdv(); diceColor(); const sb = p.querySelector("#sc-scene"); if (sb) sb.value = b.dataset.scpreset; }));
+  const pulse = () => { const pv = p.querySelector("#tg-pv"); if (pv) { pv.classList.remove("tg-pulse"); void pv.offsetWidth; pv.classList.add("tg-pulse"); } };
+  const spin = (btn) => { btn.classList.remove("tg-rolling"); void btn.offsetWidth; btn.classList.add("tg-rolling"); };
+  const busy = async (btn, fn) => { const old = btn.textContent; btn.disabled = true; btn.dataset.t0 = old; btn.textContent = "⏳ " + old.replace(/^⏳ /, ""); try { await fn(); } finally { btn.disabled = false; btn.textContent = old; pulse(); } };
+  p.querySelector("#sc-build").addEventListener("click", e => { readAdv(); busy(e.currentTarget, sceneBuild); });
+  p.querySelector("#sc-keywords").addEventListener("keydown", e => { if (e.key === "Enter") { readAdv(); busy(p.querySelector("#sc-build"), sceneBuild); } });
+  p.querySelector("#sc-dice-scene").addEventListener("click", e => { readAdv(); spin(e.currentTarget); busy(e.currentTarget, diceScene); });
+  p.querySelector("#sc-from-text").addEventListener("click", e => { readAdv(); busy(e.currentTarget, sceneFromText); });
+  p.querySelector("#sc-dice-color").addEventListener("click", e => { readAdv(); spin(e.currentTarget); diceColor(); pulse(); });
+  p.querySelector("#sc-dice-dist").addEventListener("click", e => { spin(e.currentTarget); diceDist(); pulse(); });
+  p.querySelector("#sc-harm").addEventListener("input", e => { p.querySelector("#sc-harm-v").textContent = e.target.value; if (sc.sources.length) sceneRepaint(); });
+  p.querySelectorAll("#sc-adv-l,#sc-adv-s,#sc-adv-f").forEach(s => s.addEventListener("input", () => { readAdv(); if (sc.axes) { diceColor(); } }));
+  p.querySelectorAll("[data-scpreset]").forEach(b => b.addEventListener("click", () => { sc.keywords = b.dataset.scpreset; sc.scene = ""; sc.axes = { ...SCENE_PRESET[b.dataset.scpreset] }; sc._pointKw = ""; p.querySelector("#sc-keywords").value = b.dataset.scpreset; readAdv(); diceColor(); pulse(); const sb = p.querySelector("#sc-scene"); if (sb) sb.value = b.dataset.scpreset; }));
 
   // 수동 편집
   const grid = p.querySelector("#tg-grid");

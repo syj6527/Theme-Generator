@@ -12,7 +12,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 
 const MODULE = "themeGen";
-const VERSION = "0.4.0-beta";
+const VERSION = "0.4.2-beta";
 
 const defaultSettings = {
   enabled: true,
@@ -87,7 +87,6 @@ const MOOD_PRESETS = [
   { n: "💭 몽환", m: { warm: -0.2, bright: 0.15, vivid: -0.1, dream: 0.9 } },
   { n: "✨ 선명하게", m: { warm: 0, bright: 0.05, vivid: 0.8, dream: 0 } },
   { n: "🕊️ 파스텔", m: { warm: 0.1, bright: 0.35, vivid: -0.45, dream: 0.2 } },
-  { n: "🌑 딥다크", m: { warm: -0.1, bright: -0.85, vivid: 0.1, dream: 0 } },
 ];
 
 function liftToLum(c, t) { let { h, s, l } = rgbToHsl(c.r, c.g, c.b); let rgb = { ...c }, g = 0; while (relLum(rgb) < t && l < 0.95 && g < 60) { l += 0.015; rgb = { ...hslToRgb(h, s, l), a: c.a }; g++; } return rgb; }
@@ -433,13 +432,19 @@ function diceDist(shuffle) {
   let bg = find("배경"), txt = find("그림자"), italic = find("주광원"), underline = find("강조"), border = find("보조광"), special = find("포인트");
   // 안전 폴백 (역할 못 찾으면 명도순)
   if (bg < 0 || txt < 0) { const idx = sc.sources.map((_, i) => i).sort((a, b) => sc.sources[b].l - sc.sources[a].l); bg = idx[0]; txt = idx[idx.length - 1]; italic = idx[1] ?? bg; underline = idx[2] ?? italic; border = idx[3] ?? underline; special = idx[Math.min(4, idx.length - 1)]; }
+  // 배경/UI배경에 hue·채도를 줄 소스 (기본은 배경 역할, 분배 누르면 랜덤)
+  let bgSrc = bg, uiSrc = bg;
   if (shuffle) {
-    // 강조 자리들(italic/underline/border/special)만 자기들끼리 셔플 → 배경/그림자는 고정
     const acc = [italic, underline, border, special];
     for (let i = acc.length - 1; i > 0; i--) { const j = Math.floor(rnd(0, i + 1)); [acc[i], acc[j]] = [acc[j], acc[i]]; }
     [italic, underline, border, special] = acc;
+    sc.dark = Math.random() < 0.35;
+    // 배경/UI배경 틴트 소스도 6개 중 랜덤으로 → 배경 색감이 다양해짐
+    const all = sc.sources.map((_, i) => i);
+    bgSrc = all[Math.floor(rnd(0, all.length))];
+    uiSrc = all[Math.floor(rnd(0, all.length))];
   }
-  sc.roles = { bg, txt, italic, underline, border, special };
+  sc.roles = { bg, txt, italic, underline, border, special, bgSrc, uiSrc };
   sceneRepaint();
 }
 function sceneRepaint() {
@@ -450,31 +455,44 @@ function sceneRepaint() {
 }
 // 색 → 12슬롯 배치 + 미리보기
 function scenePaint() {
-  const { harm, bg, txt, italic, underline, border, special } = sc.roleMap;
+  const { harm, bg, txt, italic, underline, border, special, bgSrc, uiSrc } = sc.roleMap;
   const lightest = harm[bg], deepest = harm[txt], A1 = harm[italic], A2 = harm[underline], B = harm[border];
   const SP = harm[special] ?? A1;
+  const BGS = harm[bgSrc] ?? lightest, UIS = harm[uiSrc] ?? lightest;   // 배경/UI 틴트 소스
   const point = sc.point;
-  const chatBg = H(lightest.h, clamp(lightest.s * 0.5, 0, 0.12), clamp(lightest.l + 0.12, 0.93, 0.985));
-  const uiBg = H(lightest.h, clamp(lightest.s * 0.5, 0, 0.14), 0.955);
-  const uiBorder = H(B.h, clamp(B.s, 0.10, 0.40), clamp(B.l, 0.62, 0.80));
-  // 본문/대사 = 가장 어두운 소스(그림자) → near-black (깊은말차)
-  const mainText = H(deepest.h, clamp(deepest.s * 0.55, 0.06, 0.24), clamp(deepest.l - 0.20, 0.13, 0.22));
-  // 강조 = 주광원/강조 역할에서 (하모나이저/분배가 여기 작용 → 눈에 보임)
-  const italicsText = H(A1.h, clamp(A1.s, 0.20, 0.62), clamp(A1.l - 0.08, 0.40, 0.62));
-  const underlineText = H(A2.h, clamp(A2.s * 0.9, 0.16, 0.5), clamp(A2.l - 0.10, 0.40, 0.58));
-  const quoteText = H(212, 0.26, 0.60);
+  const dark = !!sc.dark;   // 다크 테마 극성 (분배 다이스가 랜덤으로 켬)
+  // 배경: hue/채도는 배정된 소스(BGS) 따라 다양, 명도만 배경답게 강제 (라이트=밝게/다크=어둡게)
+  const chatBg = dark
+    ? H(BGS.h, clamp(BGS.s * 0.5, 0, 0.20), clamp(0.12 - BGS.s * 0.03, 0.07, 0.16))
+    : H(BGS.h, clamp(BGS.s * 0.55, 0, 0.16), clamp(0.955 - BGS.s * 0.04, 0.92, 0.985));
+  const uiBg = dark
+    ? H(UIS.h, clamp(UIS.s * 0.5, 0, 0.22), clamp(0.16 - UIS.s * 0.03, 0.10, 0.22))
+    : H(UIS.h, clamp(UIS.s * 0.55, 0, 0.18), clamp(0.945 - UIS.s * 0.04, 0.90, 0.975));
+  const uiBorder = dark
+    ? H(B.h, clamp(B.s, 0.10, 0.40), clamp(B.l, 0.30, 0.46))
+    : H(B.h, clamp(B.s, 0.10, 0.40), clamp(B.l, 0.62, 0.80));
+  // 본문/대사: 라이트=near-black / 다크=near-white (배경 hue 계열로 자연스럽게)
+  const mainText = dark
+    ? H(BGS.h, clamp(BGS.s * 0.35, 0.03, 0.16), clamp(0.90, 0.86, 0.95))
+    : H(deepest.h, clamp(deepest.s * 0.55, 0.06, 0.24), clamp(deepest.l - 0.20, 0.13, 0.22));
+  // 강조: 다크면 명도 올려서 어두운 배경 위에서 보이게
+  const italicsText = H(A1.h, clamp(A1.s, 0.20, 0.62), dark ? clamp(A1.l + 0.10, 0.55, 0.78) : clamp(A1.l - 0.08, 0.40, 0.62));
+  const underlineText = H(A2.h, clamp(A2.s * 0.9, 0.16, 0.5), dark ? clamp(A2.l + 0.10, 0.52, 0.74) : clamp(A2.l - 0.10, 0.40, 0.58));
+  const quoteText = H(212, 0.26, dark ? 0.70 : 0.60);
   // 형광펜 = 장면의 '포인트' 역할색 (보색 방향으로 튀는 민트/간판 효과). 없으면 키워드색.
   const anchor = (special != null && SP) ? { h: SP.h, s: Math.max(SP.s, 0.45), l: SP.l } : point;
   const hlAlpha = (+(document.getElementById("sc-hlop")?.value ?? 72)) / 100;
   const hl = makeHL(sc.hl, anchor, mainText, chatBg, hlAlpha);
   const quoteHighlight = hl.bg;
-  const dialogueColor = (sc.hl === "Dialogue") ? mainText : H(deepest.h, clamp(deepest.s * 0.5, 0.06, 0.22), clamp(deepest.l - 0.36, 0.15, 0.26));
-  const shadow = "rgba(14,14,18,0.42)";
-  const userMesTint = H(A1.h, 0.18, 0.95, 0.4);
-  const aiMesTint = H(lightest.h, 0.20, 0.97, 0.4);
+  const dialogueColor = (sc.hl === "Dialogue") ? mainText : (dark
+    ? H(A1.h, clamp(A1.s, 0.16, 0.5), clamp(A1.l + 0.14, 0.6, 0.82))
+    : H(deepest.h, clamp(deepest.s * 0.5, 0.06, 0.22), clamp(deepest.l - 0.36, 0.15, 0.26)));
+  const shadow = dark ? "rgba(0,0,0,0.6)" : "rgba(14,14,18,0.42)";
+  const userMesTint = dark ? H(A1.h, 0.22, 0.22, 0.4) : H(A1.h, 0.18, 0.95, 0.4);
+  const aiMesTint = dark ? H(deepest.h, 0.22, 0.18, 0.4) : H(lightest.h, 0.20, 0.97, 0.4);
   let c = { mainText, italicsText, underlineText, quoteText, shadow, chatBg, uiBg, uiBorder, userMesTint, aiMesTint, dialogueColor, quoteHighlight };
   let mc = parseColor(c.mainText), b = parseColor(c.chatBg), g = 0;
-  while (contrast(mc, b) < 6 && g < 60) { const h = rgbToHsl(mc.r, mc.g, mc.b); mc = { ...hslToRgb(h.h, h.s, Math.max(0, h.l - 0.02)), a: 1 }; g++; }
+  while (contrast(mc, b) < 6 && g < 60) { const h = rgbToHsl(mc.r, mc.g, mc.b); mc = { ...hslToRgb(h.h, h.s, dark ? Math.min(1, h.l + 0.02) : Math.max(0, h.l - 0.02)), a: 1 }; g++; }
   c.mainText = toRgba(mc);
   sc.themeBase = { ...c };   // Mood 후처리의 원본 = 방금 생성한 Scene 테마
   // 새 테마 만들면 Mood 슬라이더 초기화 (이전 무드가 남아 헷갈리지 않게)

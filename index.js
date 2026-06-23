@@ -12,7 +12,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 
 const MODULE = "themeGen";
-const VERSION = "0.3.1-beta";
+const VERSION = "0.3.4-beta";
 
 const defaultSettings = {
   enabled: true,
@@ -155,21 +155,52 @@ function colorName(h, s, l) {
   return lightT ? rndName(["분홍 보라", "연자주"]) : mid ? rndName(["자주", "포도"]) : rndName(["깊은 자주"]);
 }
 
-// 한 색 생성 (7축 → hsl). adv = 고급 슬라이더 델타 {dL,dS,dContrast,dFant}
-function sceneGenColor(o, adv) {
+// 장면 7축 → 베이스 hsl (역할 캐스팅의 기준점)
+function sceneBase(o, adv) {
   let hue = rnd(...(AX_TEMP[o.온도] || AX_TEMP["중립"]));
   const NL = AX_SUN[o.자연광] || AX_SUN["정오"]; hue += NL.dh;
-  let l = NL.baseL + rnd(-0.18, 0.14);
+  let l = NL.baseL;
   const AL = AX_LAMP[o.인공조명] || AX_LAMP["없음"]; hue += AL.dh; l = clamp(l + AL.dL, .16, .94);
   const hum = AX_HUM[o.습도] || AX_HUM["산뜻"], air = AX_AIR[o.공기] || AX_AIR["맑음"];
   let s = rnd(...(AX_SAT[o.채도] || AX_SAT["중채도"])) * hum.sM + AL.dS;
   let gray = Math.max(hum.gray, air.gray);
-  l = clamp(l + hum.dL + air.dL, .16, .94);
-  (o.무드 || []).forEach(v => { const d = AX_MOOD[v]; if (!d) return; if (d.dh) hue += d.dh; if (d.dS) s = clamp(s + d.dS, 0, 1); if (d.dL) l = clamp(l + d.dL, .16, .94); if (d.gray) gray = Math.max(gray, d.gray); });
-  if (adv) { l = clamp(l + (adv.dL || 0), .12, .96); s = clamp(s + (adv.dS || 0), 0, 1); if (adv.dFant) hue += adv.dFant; }
-  s = clamp(s * (1 - gray * .6), 0, 1);
-  hue = ((hue % 360) + 360) % 360;
-  return { h: hue, s, l, hex: H(hue, s, l), name: colorName(hue, s, l) };
+  (o.무드 || []).forEach(v => { const d = AX_MOOD[v]; if (!d) return; if (d.dh) hue += d.dh; if (d.dS) s = clamp(s + d.dS, 0, 1); if (d.gray) gray = Math.max(gray, d.gray); });
+  if (adv) { s = clamp(s + (adv.dS || 0), 0, 1); if (adv.dFant) hue += adv.dFant; l = clamp(l + (adv.dL || 0), .12, .96); }
+  s = clamp(s * (1 - gray * .5), 0, 1);
+  return { h: ((hue % 360) + 360) % 360, s, l, gray };
+}
+
+// 역할 정의: 장면 베이스에서 각자 다른 hue오프셋/채도배율/명도타깃 → 6색이 전부 다름
+const ROLE_SPEC = [
+  { key: "배경", dh: 0, sMul: 0.35, lT: 0.93 },
+  { key: "보조광", dh: -18, sMul: 0.75, lT: 0.72 },
+  { key: "주광원", dh: +8, sMul: 1.35, lT: 0.56 },
+  { key: "강조", dh: +28, sMul: 1.15, lT: 0.48 },
+  { key: "그림자", dh: +12, sMul: 0.5, lT: 0.22 },
+  { key: "포인트", dh: +150, sMul: 1.5, lT: 0.55 },   // 보색 방향으로 튐 (간판/민트 효과)
+];
+// 장면 → 6역할 색 캐스팅. 이름 중복 금지 + hue 거리 최소 확보.
+function castRoles(o, adv) {
+  const base = sceneBase(o, adv);
+  const used = new Set();
+  const out = [];
+  ROLE_SPEC.forEach(r => {
+    let h = (base.h + r.dh + rnd(-6, 6) + 360) % 360;
+    let s = clamp(base.s * r.sMul + rnd(-0.04, 0.04), 0.04, 0.92);
+    let l = clamp(lerp(base.l, r.lT, 0.7) + rnd(-0.04, 0.04), 0.12, 0.96);
+    // 이름 중복이면 hue를 더 틀어서 재시도
+    let name = colorName(h, s, l), tries = 0;
+    while (used.has(name) && tries < 6) { h = (h + 24 + 360) % 360; s = clamp(s + 0.06, 0.04, 0.92); name = colorName(h, s, l); tries++; }
+    used.add(name);
+    out.push({ role: r.key, h, s, l, hex: H(h, s, l), name });
+  });
+  return out;
+}
+
+// (구) 단색 1개 — 폴백/호환용
+function sceneGenColor(o, adv) {
+  const b = sceneBase(o, adv);
+  return { h: b.h, s: b.s, l: clamp(b.l + rnd(-0.18, 0.14), .16, .94), hex: H(b.h, b.s, b.l), name: colorName(b.h, b.s, b.l) };
 }
 
 // 무드 → 형광펜 타입 + 폰트 (장면 무드축 기반)
@@ -211,9 +242,13 @@ async function sceneResolve(useAI) {
       const axList = `온도:[차가움,서늘함,중립,따뜻함,뜨거움] 자연광:[새벽,아침,정오,황혼,노을,달빛] 인공조명:[없음,백열등,형광등,네온] 습도:[건조,산뜻,촉촉,습함,축축] 공기:[맑음,안개,먼지,연무,흐림,먹구름] 채도:[무채,저채도,중채도,고채도,형광] 무드:[고요,낭만,몽환,외로움,포근,물기,투명,신비,불안,활기]`;
       let prompt;
       if (!sc.scene) {
-        // 장면 생성 + 축 분류를 한 번에 (속도 2배)
-        prompt = `키워드들이 동시에 존재하는 '하나의 장면'을 1~2문장으로 그리고, 그 장면을 7개 축으로 분류해라. 색/hex 언급 절대 금지.
-각 축에서 정확히 하나(무드는 1~2개) 선택. 키워드 중 '포인트색'으로 쓸 단어 하나(point).
+        // 장면 생성 + 축 분류를 한 번에. 매번 다른 시간대/장소/상황 강제.
+        const angles = ["시간대를 바꿔서", "장소를 바꿔서", "날씨를 바꿔서", "계절을 바꿔서", "실내/실외를 바꿔서", "혼자/여럿 상황을 바꿔서"];
+        const angle = angles[Math.floor(Math.random() * angles.length)];
+        const avoid = sc._lastScenes && sc._lastScenes.length ? `\n이전에 나온 장면들과 겹치지 마라(다른 ${angle}): ${sc._lastScenes.slice(-3).join(" / ")}` : "";
+        prompt = `키워드들이 동시에 존재하는 '하나의 장면'을 1~2문장으로 그리고, 7개 축으로 분류해라. 색/hex 언급 절대 금지.
+같은 키워드라도 매번 완전히 다른 장면을 떠올려라 — ${angle} 신선한 순간을 잡아라. 뻔한 첫 연상은 피하라.${avoid}
+각 축 정확히 하나(무드 1~2개). 키워드 중 '포인트색' 단어 하나(point).
 키워드: ${kws.join(", ")}
 축 후보: ${axList}
 JSON만: {"scene":"장면 1~2문장","온도":"","자연광":"","인공조명":"","습도":"","공기":"","채도":"","무드":[""],"point":""}`;
@@ -226,7 +261,7 @@ JSON만: {"온도":"","자연광":"","인공조명":"","습도":"","공기":"","
       }
       const t = String(await callAI(prompt)); const m = t.match(/\{[\s\S]*\}/);
       const j = JSON.parse(m ? m[0] : t.replace(/```json|```/g, "").trim());
-      if (j.scene && !sc.scene) sc.scene = String(j.scene).trim().replace(/^["']|["']$/g, "");
+      if (j.scene && !sc.scene) { sc.scene = String(j.scene).trim().replace(/^["']|["']$/g, ""); (sc._lastScenes = sc._lastScenes || []).push(sc.scene.slice(0, 30)); if (sc._lastScenes.length > 5) sc._lastScenes.shift(); }
       sc.axes = { 온도: j.온도, 자연광: j.자연광, 인공조명: j.인공조명, 습도: j.습도, 공기: j.공기, 채도: j.채도, 무드: Array.isArray(j.무드) ? j.무드 : [j.무드].filter(Boolean) };
       sc._pointKw = j.point || kws[kws.length - 1] || "";
       return;
@@ -241,30 +276,32 @@ JSON만: {"온도":"","자연광":"","인공조명":"","습도":"","공기":"","
   sc._pointKw = kws[kws.length - 1] || "";
 }
 
-// 🎲 색상: 축 고정, 색만 다시
+// 🎲 색상: 축 고정, 역할 캐스팅으로 6색 (전부 다름)
 function diceColor() {
   if (!sc.axes) return;
-  const n = 5;
-  sc.sources = Array.from({ length: n }, () => sceneGenColor(sc.axes, sc.adv));
+  sc.sources = castRoles(sc.axes, sc.adv);   // [{role,h,s,l,hex,name}] ×6
   sc.point = kwPoint(sc._pointKw || "");
-  const hf = sceneHL(sc.axes); sc.hl = hf.hl; sc.font = hf.font; curFont = fontByTag(sc.font);
+  const hf = sceneHL(sc.axes); sc.hl = hf.hl; sc.font = hf.font;
+  if (!sc.fontLocked) curFont = fontByTag(sc.font);
   diceDist();
 }
-// 🎲 분배: 색 고정, 배치만 다시
-// 🎲 분배: 역할 재배치 (역할 인덱스만 새로 뽑고 repaint)
-function diceDist() {
+// 🎲 분배: 6개 명명 역할을 슬롯에 매핑. 기본은 의미대로, 분배 누르면 살짝 셔플.
+function diceDist(shuffle) {
   if (!sc.sources.length) return;
-  const harm = harmonizeBand(sc.sources, +(document.getElementById("sc-harm")?.value ?? 60));
-  const jit = () => rnd(-0.05, 0.05);
-  const idx = harm.map((_, i) => i);
-  const bg = idx.slice().sort((a, b) => (harm[b].l + jit()) - (harm[a].l + jit()))[0];
-  const txt = idx.slice().sort((a, b) => (harm[a].l + jit()) - (harm[b].l + jit()))[0];
-  let ui = idx.find(i => i !== bg && i !== txt); if (ui == null) ui = bg;
-  let border = idx.slice().reverse().find(i => i !== bg && i !== txt && i !== ui); if (border == null) border = ui;
-  sc.roles = { bg, txt, ui, border };
+  // 역할 인덱스 찾기 (castRoles 순서: 배경0 보조광1 주광원2 강조3 그림자4 포인트5)
+  const find = k => sc.sources.findIndex(s => s.role === k);
+  let bg = find("배경"), txt = find("그림자"), italic = find("주광원"), underline = find("강조"), border = find("보조광"), special = find("포인트");
+  // 안전 폴백 (역할 못 찾으면 명도순)
+  if (bg < 0 || txt < 0) { const idx = sc.sources.map((_, i) => i).sort((a, b) => sc.sources[b].l - sc.sources[a].l); bg = idx[0]; txt = idx[idx.length - 1]; italic = idx[1] ?? bg; underline = idx[2] ?? italic; border = idx[3] ?? underline; special = idx[Math.min(4, idx.length - 1)]; }
+  if (shuffle) {
+    // 강조 자리들(italic/underline/border/special)만 자기들끼리 셔플 → 배경/그림자는 고정
+    const acc = [italic, underline, border, special];
+    for (let i = acc.length - 1; i > 0; i--) { const j = Math.floor(rnd(0, i + 1)); [acc[i], acc[j]] = [acc[j], acc[i]]; }
+    [italic, underline, border, special] = acc;
+  }
+  sc.roles = { bg, txt, italic, underline, border, special };
   sceneRepaint();
 }
-// 강도/고급 변경 시: 역할 고정, 하모나이즈만 새로 → repaint (슬라이더용)
 function sceneRepaint() {
   if (!sc.sources.length || !sc.roles) return;
   const harm = harmonizeBand(sc.sources, +(document.getElementById("sc-harm")?.value ?? 60));
@@ -273,32 +310,35 @@ function sceneRepaint() {
 }
 // 색 → 12슬롯 배치 + 미리보기
 function scenePaint() {
-  const { harm, bg, txt, ui, border } = sc.roleMap;
-  const lightest = harm[bg], deepest = harm[txt], uiC = harm[ui], borderC = harm[border];
+  const { harm, bg, txt, italic, underline, border, special } = sc.roleMap;
+  const lightest = harm[bg], deepest = harm[txt], A1 = harm[italic], A2 = harm[underline], B = harm[border];
+  const SP = harm[special] ?? A1;
   const point = sc.point;
   const chatBg = H(lightest.h, clamp(lightest.s * 0.5, 0, 0.12), clamp(lightest.l + 0.12, 0.93, 0.985));
-  const uiBg = H(uiC.h, clamp(uiC.s * 0.5, 0, 0.14), 0.955);
-  const uiBorder = H(borderC.h, clamp(borderC.s * 0.6, 0.08, 0.32), clamp(borderC.l, 0.66, 0.82));
-  // 본문/대사 = 팔레트의 가장 검정에 가까운 색 (deepest hue로 near-black, '깊은말차' 느낌)
-  const mainText = H(deepest.h, clamp(deepest.s * 0.55, 0.06, 0.24), clamp(deepest.l - 0.40, 0.13, 0.22));
-  const italicsText = H(point.h, clamp(point.s * 0.7, 0.18, 0.5), clamp(point.l - 0.06, 0.42, 0.62));
-  const underlineText = H(borderC.h, clamp(borderC.s * 0.7, 0.1, 0.4), clamp(borderC.l - 0.1, 0.4, 0.58));
+  const uiBg = H(lightest.h, clamp(lightest.s * 0.5, 0, 0.14), 0.955);
+  const uiBorder = H(B.h, clamp(B.s, 0.10, 0.40), clamp(B.l, 0.62, 0.80));
+  // 본문/대사 = 가장 어두운 소스(그림자) → near-black (깊은말차)
+  const mainText = H(deepest.h, clamp(deepest.s * 0.55, 0.06, 0.24), clamp(deepest.l - 0.20, 0.13, 0.22));
+  // 강조 = 주광원/강조 역할에서 (하모나이저/분배가 여기 작용 → 눈에 보임)
+  const italicsText = H(A1.h, clamp(A1.s, 0.20, 0.62), clamp(A1.l - 0.08, 0.40, 0.62));
+  const underlineText = H(A2.h, clamp(A2.s * 0.9, 0.16, 0.5), clamp(A2.l - 0.10, 0.40, 0.58));
   const quoteText = H(212, 0.26, 0.60);
-  const hl = makeHL(sc.hl, point, mainText, chatBg);
+  // 형광펜 = 장면의 '포인트' 역할색 (보색 방향으로 튀는 민트/간판 효과). 없으면 키워드색.
+  const anchor = (special != null && SP) ? { h: SP.h, s: Math.max(SP.s, 0.45), l: SP.l } : point;
+  const hl = makeHL(sc.hl, anchor, mainText, chatBg);
   const quoteHighlight = hl.bg;
-  // 대사 글씨도 본문과 같은 near-black 계열 (Dialogue는 이미 mainText, 그 외엔 본문색으로 통일)
   const dialogueColor = (sc.hl === "Dialogue") ? mainText : H(deepest.h, clamp(deepest.s * 0.5, 0.06, 0.22), clamp(deepest.l - 0.36, 0.15, 0.26));
   const shadow = "rgba(14,14,18,0.42)";
-  const userMesTint = H(point.h, 0.18, 0.95, 0.4);
+  const userMesTint = H(A1.h, 0.18, 0.95, 0.4);
   const aiMesTint = H(lightest.h, 0.20, 0.97, 0.4);
   let c = { mainText, italicsText, underlineText, quoteText, shadow, chatBg, uiBg, uiBorder, userMesTint, aiMesTint, dialogueColor, quoteHighlight };
   let mc = parseColor(c.mainText), b = parseColor(c.chatBg), g = 0;
   while (contrast(mc, b) < 6 && g < 60) { const h = rgbToHsl(mc.r, mc.g, mc.b); mc = { ...hslToRgb(h.h, h.s, Math.max(0, h.l - 0.02)), a: 1 }; g++; }
   c.mainText = toRgba(mc);
-  sc.names = { chatBg: lightest.name, mainText: deepest.name, italicsText: point.name, uiBorder: borderC.name, point: point.name };
+  sc.names = { chatBg: lightest.name, mainText: deepest.name, italicsText: A1.name, underlineText: A2.name, uiBorder: B.name, point: point.name };
   curName = `🌫️ ${sc.keywords || sc.scene.slice(0, 12)} · ${sc.axes.온도}/${sc.axes.자연광}`;
   const badge = document.getElementById("sc-badge");
-  if (badge) badge.textContent = `${sc.axes.온도}·${sc.axes.자연광}·${sc.axes.인공조명}·${sc.axes.공기} · 형광펜 ${sc.hl} · 폰트 ${sc.font}`;
+  if (badge) badge.textContent = `${sc.axes.온도}·${sc.axes.자연광}·${sc.axes.인공조명}·${sc.axes.공기} · 형광펜 ${sc.hl}${sc.fontLocked ? "" : " · 폰트 " + sc.font}`;
   render(c);
   sceneShowSources();
 }
@@ -531,7 +571,7 @@ function panelHTML() {
         <button id="sc-from-text">🎨 이 장면으로</button>
       </div>
 
-      <p class="tg-label" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">색 <button id="sc-dice-color">🎲 색상</button> <button id="sc-dice-dist">🎲 분배</button></p>
+      <p class="tg-label" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">색 <button id="sc-dice-color">🎲 색상</button></p>
       <div id="sc-badge" class="tg-objbadge" style="margin:0 2px 8px"></div>
       <div class="tg-sources" id="sc-sources"></div>
 
@@ -559,7 +599,7 @@ function panelHTML() {
       <div class="tg-mes tg-user"><div class="tg-name">나</div><div class="tg-div"></div><div class="tg-body"><p class="tg-p">진정해, 아직 1쿼터야.</p></div></div>
     </div>
 
-    <p class="tg-label">팔레트 — 색칩/값 직접 수정</p>
+    <p class="tg-label" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">팔레트 — 색칩/값 직접 수정 <button id="sc-dice-dist">🎲 분배</button></p>
     <div class="tg-grid" id="tg-grid"></div>
 
     <div class="tg-actions">
@@ -591,7 +631,7 @@ function wirePanel() {
 
   // 프리셋 / 폰트
   p.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => { const pr = PRESETS[+b.dataset.preset]; render(pr.c); curName = pr.n; toast(`프리셋 · ${pr.n}`); }));
-  p.querySelectorAll("[data-font]").forEach(b => b.addEventListener("click", () => { curFont = FONTS[+b.dataset.font]; paintPreview(curColors); toast(`글꼴 · ${curFont.tag}`); }));
+  p.querySelectorAll("[data-font]").forEach(b => b.addEventListener("click", () => { curFont = FONTS[+b.dataset.font]; sc.fontLocked = true; paintPreview(curColors); toast(`글꼴 고정 · ${curFont.tag} (Scene에서도 유지)`); }));
 
   // 축 / 블루
   p.querySelector("#tg-axes").addEventListener("input", () => { updateEnds(); recompute(); });
@@ -608,14 +648,13 @@ function wirePanel() {
   // Scene 모드
   const readAdv = () => { sc.adv = { dL: (+p.querySelector("#sc-adv-l").value) / 100, dS: (+p.querySelector("#sc-adv-s").value) / 100, dFant: +p.querySelector("#sc-adv-f").value }; };
   const pulse = () => { const pv = p.querySelector("#tg-pv"); if (pv) { pv.classList.remove("tg-pulse"); void pv.offsetWidth; pv.classList.add("tg-pulse"); } };
-  const spin = (btn) => { btn.classList.remove("tg-rolling"); void btn.offsetWidth; btn.classList.add("tg-rolling"); };
   const busy = async (btn, fn) => { const old = btn.textContent; btn.disabled = true; btn.dataset.t0 = old; btn.textContent = "⏳ " + old.replace(/^⏳ /, ""); try { await fn(); } finally { btn.disabled = false; btn.textContent = old; pulse(); } };
   p.querySelector("#sc-build").addEventListener("click", e => { readAdv(); busy(e.currentTarget, sceneBuild); });
   p.querySelector("#sc-keywords").addEventListener("keydown", e => { if (e.key === "Enter") { readAdv(); busy(p.querySelector("#sc-build"), sceneBuild); } });
-  p.querySelector("#sc-dice-scene").addEventListener("click", e => { readAdv(); spin(e.currentTarget); busy(e.currentTarget, diceScene); });
+  p.querySelector("#sc-dice-scene").addEventListener("click", e => { readAdv(); busy(e.currentTarget, diceScene); });
   p.querySelector("#sc-from-text").addEventListener("click", e => { readAdv(); busy(e.currentTarget, sceneFromText); });
-  p.querySelector("#sc-dice-color").addEventListener("click", e => { readAdv(); spin(e.currentTarget); diceColor(); pulse(); });
-  p.querySelector("#sc-dice-dist").addEventListener("click", e => { spin(e.currentTarget); diceDist(); pulse(); });
+  p.querySelector("#sc-dice-color").addEventListener("click", e => { readAdv(); diceColor(); pulse(); });
+  p.querySelector("#sc-dice-dist").addEventListener("click", e => { diceDist(true); pulse(); });
   p.querySelector("#sc-harm").addEventListener("input", e => { p.querySelector("#sc-harm-v").textContent = e.target.value; if (sc.sources.length) sceneRepaint(); });
   p.querySelectorAll("#sc-adv-l,#sc-adv-s,#sc-adv-f").forEach(s => s.addEventListener("input", () => { readAdv(); if (sc.axes) { diceColor(); } }));
   p.querySelectorAll("[data-scpreset]").forEach(b => b.addEventListener("click", () => { sc.keywords = b.dataset.scpreset; sc.scene = ""; sc.axes = { ...SCENE_PRESET[b.dataset.scpreset] }; sc._pointKw = ""; p.querySelector("#sc-keywords").value = b.dataset.scpreset; readAdv(); diceColor(); pulse(); const sb = p.querySelector("#sc-scene"); if (sb) sb.value = b.dataset.scpreset; }));

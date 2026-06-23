@@ -12,7 +12,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 
 const MODULE = "themeGen";
-const VERSION = "0.3.4-beta";
+const VERSION = "0.3.10-beta";
 
 const defaultSettings = {
   enabled: true,
@@ -107,22 +107,41 @@ const AX_HUM = { "건조": { sM: 1.0, gray: 0, dL: +.02 }, "산뜻": { sM: 1.05,
 const AX_AIR = { "맑음": { gray: 0, dL: +.04 }, "안개": { gray: .20, dL: +.08 }, "먼지": { gray: .16, dL: -.02 }, "연무": { gray: .14, dL: +.05 }, "흐림": { gray: .22, dL: -.02 }, "먹구름": { gray: .24, dL: -.06 } };
 const AX_SAT = { "무채": [0, .06], "저채도": [.08, .20], "중채도": [.22, .42], "고채도": [.5, .72], "형광": [.7, .95] };
 const AX_MOOD = { "고요": { dS: -.04, dL: +.03 }, "낭만": { dS: +.04, dL: +.02 }, "몽환": { dh: +12, dS: +.02 }, "외로움": { dS: -.06, dL: -.03 }, "포근": { dS: +.02, dL: +.05 }, "물기": { dL: +.06, gray: .05 }, "투명": { dL: +.10, gray: .04 }, "신비": { dh: +18, dS: +.04 }, "불안": { dS: -.05, dL: -.05 }, "활기": { dS: +.12, dL: 0 } };
+// 장소 → 표면(배경/그림자) 재질색 + 어두움 경향. 빛이 아니라 '바닥/벽'이 무슨 색인가.
+const AX_PLACE = {
+  "골목": { matH: 215, matS: .07, matL: .30, dark: .12 },   // 젖은 아스팔트 먹색
+  "도시": { matH: 222, matS: .06, matL: .42, dark: .06 },   // 콘크리트/유리
+  "방": { matH: 30, matS: .12, matL: .52, dark: .02 },      // 목재/천 따뜻
+  "옥상": { matH: 210, matS: .05, matL: .50, dark: .04 },   // 콘크리트+하늘
+  "바다": { matH: 200, matS: .22, matL: .55, dark: 0 },     // 물
+  "숲": { matH: 110, matS: .22, matL: .38, dark: .06 },     // 흙/이끼
+  "들판": { matH: 70, matS: .20, matL: .55, dark: 0 },      // 풀/마른흙
+  "실내": { matH: 32, matS: .10, matL: .58, dark: 0 },      // 벽/바닥
+  "없음": { matH: null, matS: null, matL: null, dark: 0 },  // 야외 일반 → 빛 hue 따름
+};
+// 재질 → 표면 보정 (장소 위에 덧씌움)
+const AX_MAT = {
+  "아스팔트": { matH: 215, matS: .06, matL: .26 }, "콘크리트": { matH: 28, matS: .04, matL: .55 },
+  "유리": { matH: 200, matS: .10, matL: .82 }, "금속": { matH: 220, matS: .05, matL: .60 },
+  "목재": { matH: 28, matS: .32, matL: .42 }, "벽돌": { matH: 12, matS: .34, matL: .42 },
+  "천": { matH: 35, matS: .14, matL: .60 }, "흙": { matH: 30, matS: .26, matL: .40 }, "없음": {},
+};
 
 // 2층 소분류 = 1층 조합 별명 (장면 어휘 + 프리셋). 네 전용 포함.
 const SCENE_PRESET = {
-  "비온뒤": { 온도: "서늘함", 자연광: "노을", 인공조명: "없음", 습도: "습함", 공기: "흐림", 채도: "저채도", 무드: ["고요"] },
+  "비온뒤": { 온도: "서늘함", 자연광: "노을", 인공조명: "없음", 습도: "습함", 공기: "흐림", 채도: "저채도", 장소: "도시", 재질: "아스팔트", 무드: ["고요"] },
   "새벽냉기": { 온도: "차가움", 자연광: "새벽", 인공조명: "없음", 습도: "촉촉", 공기: "안개", 채도: "저채도", 무드: ["고요", "투명"] },
   "새벽냉장고": { 온도: "차가움", 자연광: "새벽", 인공조명: "형광등", 습도: "촉촉", 공기: "연무", 채도: "저채도", 무드: ["투명", "고요"] },
-  "도서관": { 온도: "따뜻함", 자연광: "황혼", 인공조명: "백열등", 습도: "건조", 공기: "먼지", 채도: "중채도", 무드: ["포근"] },
-  "젖은아스팔트": { 온도: "차가움", 자연광: "달빛", 인공조명: "백열등", 습도: "축축", 공기: "흐림", 채도: "저채도", 무드: ["외로움"] },
+  "도서관": { 온도: "따뜻함", 자연광: "황혼", 인공조명: "백열등", 습도: "건조", 공기: "먼지", 채도: "중채도", 장소: "실내", 재질: "목재", 무드: ["포근"] },
+  "젖은아스팔트": { 온도: "차가움", 자연광: "달빛", 인공조명: "백열등", 습도: "축축", 공기: "흐림", 채도: "저채도", 장소: "도시", 재질: "아스팔트", 무드: ["외로움"] },
   "먹구름": { 온도: "차가움", 자연광: "황혼", 인공조명: "없음", 습도: "습함", 공기: "먹구름", 채도: "저채도", 무드: ["고요"] },
   "먼지낀유리": { 온도: "중립", 자연광: "정오", 인공조명: "없음", 습도: "건조", 공기: "먼지", 채도: "저채도", 무드: ["외로움"] },
   "흐린하늘": { 온도: "서늘함", 자연광: "정오", 인공조명: "없음", 습도: "촉촉", 공기: "흐림", 채도: "저채도", 무드: ["고요"] },
   "습한저녁": { 온도: "따뜻함", 자연광: "노을", 인공조명: "백열등", 습도: "습함", 공기: "연무", 채도: "중채도", 무드: ["낭만"] },
   "창문물방울": { 온도: "차가움", 자연광: "아침", 인공조명: "없음", 습도: "축축", 공기: "흐림", 채도: "저채도", 무드: ["물기", "고요"] },
-  "네온골목": { 온도: "차가움", 자연광: "달빛", 인공조명: "네온", 습도: "촉촉", 공기: "연무", 채도: "고채도", 무드: ["신비"] },
-  "숲그늘": { 온도: "서늘함", 자연광: "정오", 인공조명: "없음", 습도: "촉촉", 공기: "맑음", 채도: "중채도", 무드: ["고요"] },
-  "카페창가": { 온도: "따뜻함", 자연광: "아침", 인공조명: "백열등", 습도: "건조", 공기: "맑음", 채도: "중채도", 무드: ["포근"] },
+  "네온골목": { 온도: "차가움", 자연광: "달빛", 인공조명: "네온", 습도: "촉촉", 공기: "연무", 채도: "고채도", 장소: "골목", 재질: "아스팔트", 무드: ["신비"] },
+  "숲그늘": { 온도: "서늘함", 자연광: "정오", 인공조명: "없음", 습도: "촉촉", 공기: "맑음", 채도: "중채도", 장소: "숲", 재질: "흙", 무드: ["고요"] },
+  "카페창가": { 온도: "따뜻함", 자연광: "아침", 인공조명: "백열등", 습도: "건조", 공기: "맑음", 장소: "실내", 재질: "목재", 채도: "중채도", 무드: ["포근"] },
   "포도밭오후": { 온도: "뜨거움", 자연광: "정오", 인공조명: "없음", 습도: "건조", 공기: "맑음", 채도: "고채도", 무드: ["활기"] },
   "겨울새벽": { 온도: "차가움", 자연광: "새벽", 인공조명: "없음", 습도: "건조", 공기: "안개", 채도: "저채도", 무드: ["외로움", "투명"] },
   "달빛호수": { 온도: "차가움", 자연광: "달빛", 인공조명: "없음", 습도: "촉촉", 공기: "맑음", 채도: "저채도", 무드: ["신비", "고요"] },
@@ -130,6 +149,50 @@ const SCENE_PRESET = {
 
 // 키워드 본연색 (포인트 전용 — 형광펜/이탤릭). 장면이 색을 지배하고 키워드는 점으로만.
 const KW_HUE = { "청포도": [82, 96], "포도": [275, 290], "레몬": [48, 58], "딸기": [344, 358], "민트": [150, 165], "라벤더": [258, 275], "장미": [340, 354], "복숭아": [14, 28], "바다": [195, 215], "숲": [110, 135], "노을": [12, 28], "와인": [340, 352], "꿀": [36, 46], "초콜릿": [20, 32], "하늘": [200, 218], "벚꽃": [344, 356] };
+// 명사 → 색 정체성 [hue, sat, light]. "사물은 색을 가진다" — 장면 분석의 핵심.
+const NOUN = {
+  "레몬": [52, .55, .72], "홍차": [26, .52, .40], "도서관": [34, .22, .55], "커피": [24, .5, .30], "우유": [40, .12, .92],
+  "청포도": [84, .48, .68], "포도": [282, .42, .48], "딸기": [350, .6, .60], "민트": [158, .45, .70], "라벤더": [265, .36, .70],
+  "바다": [205, .5, .50], "숲": [120, .4, .40], "노을": [16, .6, .58], "와인": [345, .5, .35], "꿀": [42, .6, .60], "모래": [38, .25, .70],
+  "눈": [210, .05, .94], "재": [30, .04, .45], "흙": [28, .3, .40], "벽돌": [12, .45, .45], "이끼": [100, .35, .40],
+  "종이": [40, .18, .80], "책": [32, .3, .42], "나무": [28, .35, .42], "황동": [44, .5, .50], "유리": [200, .12, .82],
+  "장미": [348, .55, .50], "복숭아": [20, .5, .72], "초콜릿": [25, .45, .28], "하늘": [208, .45, .70], "벚꽃": [350, .35, .82],
+  "단풍": [18, .6, .48], "잔디": [100, .45, .48], "라일락": [285, .35, .72], "오렌지": [30, .7, .60], "블루베리": [250, .4, .40],
+  "석양": [14, .65, .55], "안개": [210, .08, .78], "이슬": [195, .15, .85], "낙엽": [30, .5, .42], "철": [220, .06, .50],
+};
+// 시너리(그라데이션) 명사 = 한 단어가 여러 색을 깐다. 하늘/노을/먹구름처럼 hue가 넓게 퍼지는 장면.
+// 각 색 [hue, sat, light]. 명도순으로 역할에 펼쳐짐.
+const SCENERY = {
+  "먹구름노을": [[253, .21, .26], [266, .18, .43], [282, .25, .69], [332, .40, .63], [20, .50, .60]], // 보랏빛 먹구름 노을
+  "보랏빛하늘": [[250, .22, .30], [270, .22, .52], [288, .26, .72], [325, .38, .62], [25, .42, .64]],
+  // 노을 = 차가운 하늘빛(위) → 분홍 → 살구 → 형광주황 → 적주황 → 먹색(바닥 실루엣). 7색 풀 그라데이션.
+  "노을하늘": [[235, .14, .64], [352, .26, .71], [23, .60, .73], [28, .80, .66], [20, .76, .55], [16, .72, .46], [267, .10, .24]],
+  "노을": [[235, .14, .64], [352, .26, .70], [25, .62, .72], [28, .80, .64], [18, .74, .50], [267, .10, .25]],
+  "석양": [[230, .16, .56], [350, .30, .66], [22, .65, .68], [28, .82, .60], [15, .78, .48], [275, .12, .24]],
+  "새벽하늘": [[225, .25, .40], [240, .22, .60], [265, .20, .76], [200, .18, .82], [30, .25, .72]],
+  "비온뒤하늘": [[215, .15, .35], [225, .12, .55], [240, .10, .72], [200, .12, .80], [280, .14, .58]],
+  "먹구름": [[220, .10, .30], [225, .12, .48], [230, .10, .66], [215, .08, .78], [260, .12, .42]],
+  "밤하늘": [[235, .35, .18], [245, .30, .32], [260, .25, .50], [280, .20, .64], [210, .25, .40]],
+  // 포도밭/청포도밭 = 장면 전체. 연두 알 + 라임 잎 + 크림/살구 익은알 + 갈색 마른덩굴 + 청록 그늘 + 하늘빛
+  // (단독 '청포도'는 NOUN으로 둬서 '새벽 냉장고 청포도'처럼 공기가 주연일 땐 포인트로만)
+  "포도밭": [[100, .30, .32], [78, .50, .50], [70, .55, .62], [60, .50, .74], [40, .62, .66], [30, .40, .36], [205, .35, .74]],
+  "청포도밭": [[100, .30, .32], [75, .51, .54], [71, .59, .63], [65, .54, .76], [43, .68, .69], [31, .37, .35], [206, .40, .77]],
+  "여름숲": [[120, .42, .28], [105, .45, .40], [88, .48, .54], [70, .45, .66], [45, .30, .60], [200, .30, .72]],
+  "단풍숲": [[18, .60, .42], [28, .65, .52], [40, .70, .60], [50, .55, .68], [15, .55, .38], [200, .20, .66]],
+  "벚꽃나무": [[348, .35, .82], [352, .30, .88], [340, .25, .78], [80, .35, .58], [205, .30, .80], [30, .25, .70]],
+};
+function sceneryColors(tok) {
+  // 키워드가 시너리 이름을 포함할 때만 (짧은 명사가 긴 장면명을 건드리지 않게)
+  const k = Object.keys(SCENERY).find(n => tok === n || tok.includes(n));
+  if (!k) return null;
+  return SCENERY[k].map(([h, s, l]) => ({ h: h + rnd(-4, 4), s: clamp(s + rnd(-.04, .04), .04, .92), l: clamp(l + rnd(-.04, .04), .12, .96), key: k }));
+}
+function nounColor(tok) {
+  const k = Object.keys(NOUN).find(n => tok.includes(n) || n.includes(tok));
+  if (!k) return null;
+  const [h, s, l] = NOUN[k];
+  return { h: h + rnd(-4, 4), s: clamp(s + rnd(-.05, .05), .05, .92), l: clamp(l + rnd(-.05, .05), .14, .95), key: k };
+}
 function kwPoint(token) {
   const k = Object.keys(KW_HUE).find(x => token.includes(x));
   const hr = k ? KW_HUE[k] : null;
@@ -155,42 +218,111 @@ function colorName(h, s, l) {
   return lightT ? rndName(["분홍 보라", "연자주"]) : mid ? rndName(["자주", "포도"]) : rndName(["깊은 자주"]);
 }
 
-// 장면 7축 → 베이스 hsl (역할 캐스팅의 기준점)
+// 장면 7~9축 → 광원색(light) + 표면색(mat) 분리
 function sceneBase(o, adv) {
-  let hue = rnd(...(AX_TEMP[o.온도] || AX_TEMP["중립"]));
-  const NL = AX_SUN[o.자연광] || AX_SUN["정오"]; hue += NL.dh;
-  let l = NL.baseL;
-  const AL = AX_LAMP[o.인공조명] || AX_LAMP["없음"]; hue += AL.dh; l = clamp(l + AL.dL, .16, .94);
+  // ── 광원 hue (빛이 무슨 색인가: 온도+자연광+인공조명+무드) ──
+  let lightH = rnd(...(AX_TEMP[o.온도] || AX_TEMP["중립"]));
+  const NL = AX_SUN[o.자연광] || AX_SUN["정오"]; lightH += NL.dh;
+  let baseL = NL.baseL;
+  const AL = AX_LAMP[o.인공조명] || AX_LAMP["없음"]; lightH += AL.dh; baseL = clamp(baseL + AL.dL, .16, .94);
   const hum = AX_HUM[o.습도] || AX_HUM["산뜻"], air = AX_AIR[o.공기] || AX_AIR["맑음"];
-  let s = rnd(...(AX_SAT[o.채도] || AX_SAT["중채도"])) * hum.sM + AL.dS;
+  let lightS = rnd(...(AX_SAT[o.채도] || AX_SAT["중채도"])) * hum.sM + AL.dS;
   let gray = Math.max(hum.gray, air.gray);
-  (o.무드 || []).forEach(v => { const d = AX_MOOD[v]; if (!d) return; if (d.dh) hue += d.dh; if (d.dS) s = clamp(s + d.dS, 0, 1); if (d.gray) gray = Math.max(gray, d.gray); });
-  if (adv) { s = clamp(s + (adv.dS || 0), 0, 1); if (adv.dFant) hue += adv.dFant; l = clamp(l + (adv.dL || 0), .12, .96); }
-  s = clamp(s * (1 - gray * .5), 0, 1);
-  return { h: ((hue % 360) + 360) % 360, s, l, gray };
+  (o.무드 || []).forEach(v => { const d = AX_MOOD[v]; if (!d) return; if (d.dh) lightH += d.dh; if (d.dS) lightS = clamp(lightS + d.dS, 0, 1); if (d.gray) gray = Math.max(gray, d.gray); });
+  const neon = o.인공조명 === "네온";
+  if (adv) { lightS = clamp(lightS + (adv.dS || 0), 0, 1); if (adv.dFant) lightH += adv.dFant; baseL = clamp(baseL + (adv.dL || 0), .12, .96); }
+  lightS = clamp(lightS * (1 - gray * .45), 0, 1);
+  lightH = ((lightH % 360) + 360) % 360;
+
+  // ── 표면 hue (바닥/벽이 무슨 색인가: 장소+재질). 없으면 빛 hue를 차갑게 ──
+  const pl = AX_PLACE[o.장소] || AX_PLACE["없음"];
+  const mt = AX_MAT[o.재질] || AX_MAT["없음"];
+  let matH = (mt.matH != null) ? mt.matH : (pl.matH != null ? pl.matH : (lightH + 4) % 360);
+  let matS = (mt.matS != null) ? mt.matS : (pl.matS != null ? pl.matS : clamp(lightS * 0.4, 0.04, 0.2));
+  let matL = (mt.matL != null) ? mt.matL : (pl.matL != null ? pl.matL : clamp(baseL - 0.1, 0.3, 0.7));
+  matS = clamp(matS * (1 - gray * .3), 0.03, 0.4);
+  const dark = pl.dark || 0;
+  return { lightH, lightS, baseL, matH, matS, matL, gray, neon, dark };
 }
 
-// 역할 정의: 장면 베이스에서 각자 다른 hue오프셋/채도배율/명도타깃 → 6색이 전부 다름
+// 역할: 표면(mat) / 광원(light) / 공기(air) / 사물(noun) 어디서 색을 끌어올지
 const ROLE_SPEC = [
-  { key: "배경", dh: 0, sMul: 0.35, lT: 0.93 },
-  { key: "보조광", dh: -18, sMul: 0.75, lT: 0.72 },
-  { key: "주광원", dh: +8, sMul: 1.35, lT: 0.56 },
-  { key: "강조", dh: +28, sMul: 1.15, lT: 0.48 },
-  { key: "그림자", dh: +12, sMul: 0.5, lT: 0.22 },
-  { key: "포인트", dh: +150, sMul: 1.5, lT: 0.55 },   // 보색 방향으로 튐 (간판/민트 효과)
+  { key: "배경", from: "mat", dh: 0, sMul: 0.6, lShift: +0.55 },     // 표면을 밝힌 것 = 배경
+  { key: "그림자", from: "mat", dh: +4, sMul: 0.9, lShift: -0.06 },  // 표면 어두운 쪽 = 먹색
+  { key: "보조광", from: "air", dh: -8, sMul: 0.7, lT: 0.70 },       // 공기/분위기(달빛 라벤더) = 여기만
+  { key: "주광원", from: "noun", dh: 0, sMul: 1.25, lT: 0.56 },      // 사물1 (가장 선명) — 홍차/레몬
+  { key: "강조", from: "noun", dh: 0, sMul: 1.1, lT: 0.52 },         // 사물2 — 도서관/레몬
+  { key: "포인트", from: "noun", dh: 0, sMul: 1.4, lT: 0.55 },       // 사물3 or 보색 튐
 ];
-// 장면 → 6역할 색 캐스팅. 이름 중복 금지 + hue 거리 최소 확보.
-function castRoles(o, adv) {
-  const base = sceneBase(o, adv);
-  const used = new Set();
-  const out = [];
+function castRoles(o, adv, keywords) {
+  const b = sceneBase(o, adv);
+  const used = new Set(), out = [];
+  // 키워드 명사색 추출 → 선명한 순으로 정렬 (사물이 주연)
+  const kws = (keywords || "").split(/[\s,/]+/).filter(Boolean);
+
+  // ── 시너리(그라데이션 하늘/노을) 감지: 있으면 그 색들을 역할에 명도순으로 펼침 ──
+  let scenery = null;
+  for (const k of kws) { const sc2 = sceneryColors(k); if (sc2) { scenery = sc2; break; } }
+  // 장면 축이 하늘/노을류면 키워드 없어도 시너리 적용
+  if (!scenery && (o.공기 === "먹구름" || o.공기 === "흐림") && (o.자연광 === "노을" || o.자연광 === "황혼")) scenery = sceneryColors("먹구름노을");
+  if (scenery) {
+    // 어두움→밝음 정렬 후 역할에 배정
+    const g = scenery.slice().sort((a, c) => a.l - c.l);
+    const pick = (i) => g[clamp(i, 0, g.length - 1)];
+    const roleColors = {
+      "그림자": pick(0),
+      "주광원": pick(1),
+      "강조": pick(2),
+      "보조광": pick(3),
+      "포인트": pick(g.length - 1),
+      "배경": { h: pick(g.length - 1).h, s: clamp(pick(g.length - 1).s * 0.4, 0.04, 0.2), l: 0.94 },
+    };
+    ROLE_SPEC.forEach(r => {
+      const c = roleColors[r.key] || pick(2);
+      let h = c.h + rnd(-3, 3), s = c.s, l = c.l;
+      let name = colorName(h, s, l), tries = 0;
+      while (used.has(name) && tries < 6) { h = (h + 18) % 360; s = clamp(s + 0.04, 0.03, 0.95); name = colorName(h, s, l); tries++; }
+      used.add(name);
+      out.push({ role: r.key, h, s, l, hex: H(h, s, l), name });
+    });
+    return out;
+  }
+
+  const nounPool = kws.map(nounColor).filter(Boolean).sort((a, b2) => b2.s - a.s);
+  let nounIdx = 0;
+  // 배경을 가장 밝은 명사로 살짝 틴트 (예: 레몬 → 크림 배경)
+  const lightNoun = nounPool.slice().sort((a, c) => c.l - a.l)[0];
+
   ROLE_SPEC.forEach(r => {
-    let h = (base.h + r.dh + rnd(-6, 6) + 360) % 360;
-    let s = clamp(base.s * r.sMul + rnd(-0.04, 0.04), 0.04, 0.92);
-    let l = clamp(lerp(base.l, r.lT, 0.7) + rnd(-0.04, 0.04), 0.12, 0.96);
-    // 이름 중복이면 hue를 더 틀어서 재시도
+    let h, s, l;
+    if (r.from === "mat") {
+      h = (b.matH + r.dh + rnd(-5, 5) + 360) % 360;
+      // 배경에 밝은 명사 hue를 살짝 섞어 장면 냄새 (20%)
+      if (r.key === "배경" && lightNoun) h = (h * 0.7 + lightNoun.h * 0.3 + 360) % 360;
+      s = clamp(b.matS * r.sMul + rnd(-0.02, 0.02), 0.03, 0.45);
+      l = (r.lShift != null) ? clamp(b.matL + r.lShift - b.dark + rnd(-0.03, 0.03), 0.12, 0.96) : clamp((r.lT ?? b.matL) - b.dark, 0.12, 0.96);
+    } else if (r.from === "air") {
+      h = (b.lightH + r.dh + rnd(-6, 6) + 360) % 360;
+      s = clamp(b.lightS * r.sMul * 0.7 + rnd(-0.03, 0.03), 0.05, 0.5);
+      l = clamp(r.lT + rnd(-0.04, 0.04), 0.4, 0.86);
+    } else if (r.from === "noun") {
+      const nc = nounPool[nounIdx++];
+      if (nc) {
+        // 사물색을 역할 명도에 맞춰 조정 (hue/채도는 사물 정체성 유지)
+        h = nc.h + rnd(-4, 4);
+        s = clamp(nc.s * (r.sMul * 0.8 + 0.2) + rnd(-0.03, 0.03), 0.08, 0.92);
+        l = clamp(lerp(nc.l, r.lT, 0.35) + rnd(-0.03, 0.03), 0.22, 0.78);
+      } else {
+        // 명사 부족 → 빛에서 (포인트는 보색 튐)
+        const dh = (r.key === "포인트") ? 165 : (r.key === "강조" ? 50 : 0);
+        h = (b.lightH + dh + rnd(-6, 6) + 360) % 360;
+        const sBoost = b.neon ? 1.35 : 1.0;
+        s = clamp(b.lightS * r.sMul * sBoost + (b.neon ? 0.18 : 0), 0.06, 0.95);
+        l = clamp(r.lT + rnd(-0.04, 0.04), 0.30, 0.72);
+      }
+    }
     let name = colorName(h, s, l), tries = 0;
-    while (used.has(name) && tries < 6) { h = (h + 24 + 360) % 360; s = clamp(s + 0.06, 0.04, 0.92); name = colorName(h, s, l); tries++; }
+    while (used.has(name) && tries < 6) { h = (h + 22) % 360; s = clamp(s + 0.05, 0.03, 0.95); name = colorName(h, s, l); tries++; }
     used.add(name);
     out.push({ role: r.key, h, s, l, hex: H(h, s, l), name });
   });
@@ -200,7 +332,7 @@ function castRoles(o, adv) {
 // (구) 단색 1개 — 폴백/호환용
 function sceneGenColor(o, adv) {
   const b = sceneBase(o, adv);
-  return { h: b.h, s: b.s, l: clamp(b.l + rnd(-0.18, 0.14), .16, .94), hex: H(b.h, b.s, b.l), name: colorName(b.h, b.s, b.l) };
+  return { h: b.lightH, s: b.lightS, l: clamp(b.baseL + rnd(-0.18, 0.14), .16, .94), hex: H(b.lightH, b.lightS, b.baseL), name: colorName(b.lightH, b.lightS, b.baseL) };
 }
 
 // 무드 → 형광펜 타입 + 폰트 (장면 무드축 기반)
@@ -211,9 +343,10 @@ function sceneHL(axes) {
   if (m.includes("외로움") || m.includes("고요") || axes.온도 === "차가움") return { hl: "Dialogue", font: "literary" };
   return { hl: "Romantic", font: "cozy" };
 }
-function makeHL(type, point, mainHex, bgHex) {
+function makeHL(type, point, mainHex, bgHex, alpha) {
+  const a = (alpha == null) ? 0.72 : clamp(alpha, 0, 1);
   const seed = hslToRgb(((point.h % 360) + 360) % 360 / 360, Math.max(point.s, 0.5), 0.55), bg = parseColor(bgHex);
-  const mix = w => toRgba({ r: seed.r * w + bg.r * (1 - w), g: seed.g * w + bg.g * (1 - w), b: seed.b * w + bg.b * (1 - w), a: 0.72 });
+  const mix = w => toRgba({ r: seed.r * w + bg.r * (1 - w), g: seed.g * w + bg.g * (1 - w), b: seed.b * w + bg.b * (1 - w), a });
   switch (type) {
     case "Dialogue": return { bg: mix(0.20), txt: mainHex };
     case "Vintage": return { bg: mix(0.15), txt: H(point.h, point.s * 0.7, 0.30) };
@@ -239,7 +372,7 @@ async function sceneResolve(useAI) {
   const kws = (sc.keywords || "").split(/[\s,/]+/).filter(Boolean);
   if (useAI && settings().aiInPanel) {
     try {
-      const axList = `온도:[차가움,서늘함,중립,따뜻함,뜨거움] 자연광:[새벽,아침,정오,황혼,노을,달빛] 인공조명:[없음,백열등,형광등,네온] 습도:[건조,산뜻,촉촉,습함,축축] 공기:[맑음,안개,먼지,연무,흐림,먹구름] 채도:[무채,저채도,중채도,고채도,형광] 무드:[고요,낭만,몽환,외로움,포근,물기,투명,신비,불안,활기]`;
+      const axList = `온도:[차가움,서늘함,중립,따뜻함,뜨거움] 자연광:[새벽,아침,정오,황혼,노을,달빛] 인공조명:[없음,백열등,형광등,네온] 습도:[건조,산뜻,촉촉,습함,축축] 공기:[맑음,안개,먼지,연무,흐림,먹구름] 채도:[무채,저채도,중채도,고채도,형광] 장소:[골목,도시,방,옥상,바다,숲,들판,실내,없음] 재질:[아스팔트,콘크리트,유리,금속,목재,벽돌,천,흙,없음] 무드:[고요,낭만,몽환,외로움,포근,물기,투명,신비,불안,활기]`;
       let prompt;
       if (!sc.scene) {
         // 장면 생성 + 축 분류를 한 번에. 매번 다른 시간대/장소/상황 강제.
@@ -251,18 +384,18 @@ async function sceneResolve(useAI) {
 각 축 정확히 하나(무드 1~2개). 키워드 중 '포인트색' 단어 하나(point).
 키워드: ${kws.join(", ")}
 축 후보: ${axList}
-JSON만: {"scene":"장면 1~2문장","온도":"","자연광":"","인공조명":"","습도":"","공기":"","채도":"","무드":[""],"point":""}`;
+JSON만: {"scene":"장면 1~2문장","온도":"","자연광":"","인공조명":"","습도":"","공기":"","채도":"","장소":"","재질":"","무드":[""],"point":""}`;
       } else {
         // 유저가 장면 직접 씀 → 축만
         prompt = `다음 장면을 7개 축으로 분류해라. 각 축 정확히 하나(무드 1~2개). 포인트 단어 하나(point).
 축 후보: ${axList}
 장면: "${sc.scene}"
-JSON만: {"온도":"","자연광":"","인공조명":"","습도":"","공기":"","채도":"","무드":[""],"point":""}`;
+JSON만: {"온도":"","자연광":"","인공조명":"","습도":"","공기":"","채도":"","장소":"","재질":"","무드":[""],"point":""}`;
       }
       const t = String(await callAI(prompt)); const m = t.match(/\{[\s\S]*\}/);
       const j = JSON.parse(m ? m[0] : t.replace(/```json|```/g, "").trim());
       if (j.scene && !sc.scene) { sc.scene = String(j.scene).trim().replace(/^["']|["']$/g, ""); (sc._lastScenes = sc._lastScenes || []).push(sc.scene.slice(0, 30)); if (sc._lastScenes.length > 5) sc._lastScenes.shift(); }
-      sc.axes = { 온도: j.온도, 자연광: j.자연광, 인공조명: j.인공조명, 습도: j.습도, 공기: j.공기, 채도: j.채도, 무드: Array.isArray(j.무드) ? j.무드 : [j.무드].filter(Boolean) };
+      sc.axes = { 온도: j.온도, 자연광: j.자연광, 인공조명: j.인공조명, 습도: j.습도, 공기: j.공기, 채도: j.채도, 장소: j.장소, 재질: j.재질, 무드: Array.isArray(j.무드) ? j.무드 : [j.무드].filter(Boolean) };
       sc._pointKw = j.point || kws[kws.length - 1] || "";
       return;
     } catch (e) { console.warn("[theme-gen] Scene AI 실패, 프리셋 폴백:", e); toast("AI 실패 — 기본 장면으로"); }
@@ -279,7 +412,7 @@ JSON만: {"온도":"","자연광":"","인공조명":"","습도":"","공기":"","
 // 🎲 색상: 축 고정, 역할 캐스팅으로 6색 (전부 다름)
 function diceColor() {
   if (!sc.axes) return;
-  sc.sources = castRoles(sc.axes, sc.adv);   // [{role,h,s,l,hex,name}] ×6
+  sc.sources = castRoles(sc.axes, sc.adv, sc.keywords);   // [{role,h,s,l,hex,name}] ×6
   sc.point = kwPoint(sc._pointKw || "");
   const hf = sceneHL(sc.axes); sc.hl = hf.hl; sc.font = hf.font;
   if (!sc.fontLocked) curFont = fontByTag(sc.font);
@@ -325,7 +458,8 @@ function scenePaint() {
   const quoteText = H(212, 0.26, 0.60);
   // 형광펜 = 장면의 '포인트' 역할색 (보색 방향으로 튀는 민트/간판 효과). 없으면 키워드색.
   const anchor = (special != null && SP) ? { h: SP.h, s: Math.max(SP.s, 0.45), l: SP.l } : point;
-  const hl = makeHL(sc.hl, anchor, mainText, chatBg);
+  const hlAlpha = (+(document.getElementById("sc-hlop")?.value ?? 72)) / 100;
+  const hl = makeHL(sc.hl, anchor, mainText, chatBg, hlAlpha);
   const quoteHighlight = hl.bg;
   const dialogueColor = (sc.hl === "Dialogue") ? mainText : H(deepest.h, clamp(deepest.s * 0.5, 0.06, 0.22), clamp(deepest.l - 0.36, 0.15, 0.26));
   const shadow = "rgba(14,14,18,0.42)";
@@ -579,6 +713,9 @@ function panelHTML() {
         <div class="tg-harmtop"><span>어우러짐 강도</span><span id="sc-harm-v">60</span></div>
         <input type="range" id="sc-harm" min="0" max="100" value="60">
         <div class="tg-harmend"><span>날것</span><span>한 가족</span></div>
+        <div class="tg-harmtop" style="margin-top:14px"><span>형광펜 투명도</span><span id="sc-hlop-v">72</span></div>
+        <input type="range" id="sc-hlop" min="0" max="100" value="72">
+        <div class="tg-harmend"><span>투명</span><span>진하게</span></div>
       </div>
 
       <details class="tg-adv">
@@ -656,6 +793,7 @@ function wirePanel() {
   p.querySelector("#sc-dice-color").addEventListener("click", e => { readAdv(); diceColor(); pulse(); });
   p.querySelector("#sc-dice-dist").addEventListener("click", e => { diceDist(true); pulse(); });
   p.querySelector("#sc-harm").addEventListener("input", e => { p.querySelector("#sc-harm-v").textContent = e.target.value; if (sc.sources.length) sceneRepaint(); });
+  p.querySelector("#sc-hlop").addEventListener("input", e => { p.querySelector("#sc-hlop-v").textContent = e.target.value; if (sc.sources.length) sceneRepaint(); });
   p.querySelectorAll("#sc-adv-l,#sc-adv-s,#sc-adv-f").forEach(s => s.addEventListener("input", () => { readAdv(); if (sc.axes) { diceColor(); } }));
   p.querySelectorAll("[data-scpreset]").forEach(b => b.addEventListener("click", () => { sc.keywords = b.dataset.scpreset; sc.scene = ""; sc.axes = { ...SCENE_PRESET[b.dataset.scpreset] }; sc._pointKw = ""; p.querySelector("#sc-keywords").value = b.dataset.scpreset; readAdv(); diceColor(); pulse(); const sb = p.querySelector("#sc-scene"); if (sb) sb.value = b.dataset.scpreset; }));
 

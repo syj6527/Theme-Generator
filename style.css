@@ -142,3 +142,8 @@
 .tg-preview { transition: background .2s; }
 .tg-pulse { animation: tg-pulse .35s ease; }
 @keyframes tg-pulse { 0% { opacity: .55; } 100% { opacity: 1; } }
+
+/* ── v0.3.13: 리셋 버튼 ── */
+.tg-reset{width:100%;margin:10px 0 4px;background:transparent;border:1px solid var(--tg-line,#e8e0d2);color:var(--tg-dim,#9a8f7e);border-radius:8px;padding:8px 0;font-family:inherit;font-size:12px;cursor:pointer;transition:transform .08s,border-color .15s;}
+.tg-reset:hover{border-color:var(--tg-accent,#8aa56f);color:var(--tg-ink,#463d33);}
+.tg-reset:active{transform:scale(0.96);}

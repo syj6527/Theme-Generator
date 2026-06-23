@@ -12,7 +12,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 
 const MODULE = "themeGen";
-const VERSION = "0.3.13-beta";
+const VERSION = "0.4.0-beta";
 
 const defaultSettings = {
   enabled: true,
@@ -48,41 +48,48 @@ function contrast(c1, c2) { const L1 = relLum(c1), L2 = relLum(c2); const hi = M
 function H(hueDeg, s, l, a) { const rgb = hslToRgb(((hueDeg % 360) + 360) % 360 / 360, clamp(s, 0, 1), clamp(l, 0, 1)); return toRgba({ ...rgb, a: a == null ? 1 : a }); }
 function flatten(fg, bg) { const f = parseColor(fg), b = parseColor(bg); const a = f.a == null ? 1 : f.a; return toRgba({ r: f.r * a + b.r * (1 - a), g: f.g * a + b.g * (1 - a), b: f.b * a + b.b * (1 - a), a: 1 }); }
 
-/* ───────── 엔진: 무드 축 → 12슬롯 ───────── */
-function engine(d, lockBlue) {
-  const humid = d.humid / 100, bright = d.bright / 100, sat = d.sat / 100, contrast = d.contrast / 100, fant = d.fantasy / 100;
-  const tempC = (d.temp - 50) / 50;
-  const light = d.bright >= 45;
-  let baseHue = tempC >= 0 ? (45 - tempC * 30) : (205 + (-tempC) * 30);
-  baseHue = lerp(baseHue, 285, fant * 0.5);
-
-  const bgL = light ? lerp(0.93, 0.985, bright) : lerp(0.10, 0.20, bright);
-  const bgS = clamp(0.03 + humid * 0.05, 0, 0.12);
-  const chatBg = H(baseHue, bgS, bgL);
-  const uiBg = H(baseHue, bgS * 1.15, light ? bgL - 0.02 : bgL + 0.025);
-  const uiBorder = H(baseHue, clamp(sat * 0.35 + 0.08, 0, 0.4), light ? lerp(0.66, 0.82, bright) : lerp(0.28, 0.4, bright));
-
-  const mainL = light ? lerp(0.34, 0.16, contrast) : lerp(0.74, 0.92, contrast);
-  const mainS = clamp(0.05 + (1 - humid) * 0.06, 0, 0.16);
-  const mainText = H(baseHue, mainS, mainL);
-
-  const aSat = clamp(lerp(0.18, 0.62, sat) * lerp(1, 0.72, humid) + fant * 0.12, 0, 0.85);
-  const aLgt = light ? lerp(0.70, 0.56, contrast) : lerp(0.58, 0.72, contrast);
-  const sigHue = baseHue + 22 + fant * 14;                          // 같은 세계관 내 약한 시프트 (보색 아님)
-  const italicsText = H(sigHue, aSat, aLgt);
-  const underlineText = H(baseHue + 34, aSat * 0.62, aLgt * 0.97);
-  const quoteText = lockBlue ? H(212, 0.30, 0.64) : H(baseHue + 170, aSat * 0.7, aLgt);
-
-  const shadow = toRgba({ r: 14, g: 14, b: 18, a: lerp(0.25, 0.6, contrast) });
-  const userMesTint = H(baseHue + 8, clamp(0.18 + sat * 0.14, 0, 0.42), light ? 0.95 : 0.32, 0.5);
-  const aiMesTint = H(baseHue - 30, clamp(0.20 + sat * 0.14, 0, 0.42), light ? 0.965 : 0.28, 0.5);
-
-  const dialogueColor = H(baseHue, clamp(mainS + 0.07, 0, 0.22), light ? 0.20 : 0.86);
-  // 형광펜 = 보색 아님. 시그니처에서 명도+ 채도- → 같은 무드의 '가장 밝은 색'
-  const quoteHighlight = H(sigHue, clamp(aSat - 0.30, 0.08, 0.5), clamp(aLgt + 0.20, 0, 0.92), 0.4);
-
-  return guard({ mainText, italicsText, underlineText, quoteText, shadow, chatBg, uiBg, uiBorder, userMesTint, aiMesTint, dialogueColor, quoteHighlight });
+/* ───────── 🌗 무드 후처리: 현재(Scene) 테마를 받아 무드 변형 ─────────
+ * m = { warm:-1..1, bright:-1..1, vivid:-1..1, dream:0..1 }. 가운데=무효과, 양끝=강효과.
+ * 핵심: 배경/본문은 명도 방향이 반대 (다크무드 = 배경↓·본문↑) → 검정 뭉개짐 방지.
+ */
+function moodOne(col, m, role) {
+  const p = parseColor(col); const a = p.a == null ? 1 : p.a;
+  let { h, s, l } = rgbToHsl(p.r, p.g, p.b); h *= 360;   // rgbToHsl은 0~1 → degree로
+  const isBg = role === "bg";     // 배경/UI 면
+  const isText = role === "text"; // 본문/대사 글자
+  if (m.warm) { const target = m.warm > 0 ? 35 : 210; const pull = Math.abs(m.warm) * 0.18; h = h + (((target - h + 540) % 360) - 180) * pull; s = clamp(s + Math.abs(m.warm) * 0.05, 0, 1); }
+  if (m.bright) {
+    // 배경: bright 그대로 (밝게=밝은 배경, 어둡게=어두운 배경)
+    // 본문: 반대로 (어두운 무드면 본문은 오히려 밝아져 대비 유지)
+    // 강조/기타: 약하게 따라감
+    const dir = isBg ? 1 : isText ? -0.7 : 0.4;
+    l = clamp(l + m.bright * 0.18 * dir, isText ? 0.10 : 0.06, isText ? 0.96 : 0.985);
+  }
+  if (m.vivid && !isBg) s = clamp(s + m.vivid * 0.25, 0, 1);   // 배경 채도는 거의 안 건드림
+  if (m.vivid && isBg) s = clamp(s + m.vivid * 0.06, 0, 0.16);
+  if (m.dream) { h = h + (((265 - h + 540) % 360) - 180) * 0.25 * m.dream; s = clamp(s * (1 - 0.2 * m.dream), 0, 1); if (!isText) l = clamp(l + 0.04 * m.dream, 0, 0.98); }
+  l = clamp(l, 0.04, 0.98);
+  return H(h, s, l, a);   // H()가 hue(degree)→0..1 변환 + clamp 처리
 }
+const MOOD_ROLE = { chatBg: "bg", uiBg: "bg", userMesTint: "bg", aiMesTint: "bg", mainText: "text", dialogueColor: "text" };
+function moodTransform(base, m) {
+  if (!base) return base;
+  const out = {};
+  for (const k in base) out[k] = moodOne(base[k], m, MOOD_ROLE[k] || "accent");
+  return guard(out);
+}
+// 무드 프리셋 (주제별 변형값)
+const MOOD_PRESETS = [
+  { n: "🌙 누아르", m: { warm: -0.5, bright: -0.7, vivid: -0.3, dream: 0 } },
+  { n: "🔥 따뜻하게", m: { warm: 0.8, bright: 0.1, vivid: 0.2, dream: 0 } },
+  { n: "❄️ 차갑게", m: { warm: -0.8, bright: 0.1, vivid: 0.1, dream: 0 } },
+  { n: "📷 빈티지", m: { warm: 0.4, bright: -0.1, vivid: -0.5, dream: 0 } },
+  { n: "💭 몽환", m: { warm: -0.2, bright: 0.15, vivid: -0.1, dream: 0.9 } },
+  { n: "✨ 선명하게", m: { warm: 0, bright: 0.05, vivid: 0.8, dream: 0 } },
+  { n: "🕊️ 파스텔", m: { warm: 0.1, bright: 0.35, vivid: -0.45, dream: 0.2 } },
+  { n: "🌑 딥다크", m: { warm: -0.1, bright: -0.85, vivid: 0.1, dream: 0 } },
+];
+
 function liftToLum(c, t) { let { h, s, l } = rgbToHsl(c.r, c.g, c.b); let rgb = { ...c }, g = 0; while (relLum(rgb) < t && l < 0.95 && g < 60) { l += 0.015; rgb = { ...hslToRgb(h, s, l), a: c.a }; g++; } return rgb; }
 function guard(c) {
   const out = { ...c }; const bg = parseColor(out.chatBg); const light = relLum(bg) > 0.5;
@@ -469,6 +476,9 @@ function scenePaint() {
   let mc = parseColor(c.mainText), b = parseColor(c.chatBg), g = 0;
   while (contrast(mc, b) < 6 && g < 60) { const h = rgbToHsl(mc.r, mc.g, mc.b); mc = { ...hslToRgb(h.h, h.s, Math.max(0, h.l - 0.02)), a: 1 }; g++; }
   c.mainText = toRgba(mc);
+  sc.themeBase = { ...c };   // Mood 후처리의 원본 = 방금 생성한 Scene 테마
+  // 새 테마 만들면 Mood 슬라이더 초기화 (이전 무드가 남아 헷갈리지 않게)
+  ["mood-warm", "mood-bright", "mood-vivid", "mood-dream"].forEach(id => { const el = document.getElementById(id); if (el) el.value = 0; });
   sc.names = { chatBg: lightest.name, mainText: deepest.name, italicsText: A1.name, underlineText: A2.name, uiBorder: B.name, point: point.name };
   curName = `🌫️ ${sc.keywords || sc.scene.slice(0, 12)} · ${sc.axes.온도}/${sc.axes.자연광}`;
   const badge = document.getElementById("sc-badge");
@@ -534,18 +544,9 @@ const FONTS = [
   { n: "🌃 기계·네온", tag: "cyber", css: "'Orbitron','Rajdhani',sans-serif" },
   { n: "☕ 코지", tag: "cozy", css: "'Noto Sans KR',sans-serif" },
 ];
-const PRESETS = [
-  { n: "🍓 딸기우유", c: { mainText: "#4A4043", italicsText: "#D8A2AF", underlineText: "#B88A96", quoteText: "#8FA6C4", shadow: "#101010", chatBg: "#FFF9FA", uiBg: "#FFF4F6", uiBorder: "#D9BCC4", userMesTint: "rgba(255,247,248,0.5)", aiMesTint: "rgba(255,253,253,0.5)", dialogueColor: "#3A3033", quoteHighlight: "rgba(233,204,214,0.4)" } },
-  { n: "🍋 레몬 파운드", c: { mainText: "#494233", italicsText: "#D6B85E", underlineText: "#C7B04A", quoteText: "#8DA8C5", shadow: "#101010", chatBg: "#FFFDF4", uiBg: "#FFF9E9", uiBorder: "#E4D79C", userMesTint: "rgba(255,249,233,0.5)", aiMesTint: "rgba(255,253,244,0.5)", dialogueColor: "#3A3320", quoteHighlight: "rgba(255,232,135,0.35)" } },
-  { n: "☕ 티라미수", c: { mainText: "#46372F", italicsText: "#B9967A", underlineText: "#8E6F5D", quoteText: "#8DA8C5", shadow: "#101010", chatBg: "#FAF6F1", uiBg: "#F2EBE4", uiBorder: "#CBB6A5", userMesTint: "rgba(242,235,228,0.5)", aiMesTint: "rgba(250,246,241,0.5)", dialogueColor: "#2F231C", quoteHighlight: "rgba(220,180,135,0.3)" } },
-  { n: "🍵 말차딸기", c: { mainText: "#3F433E", italicsText: "#D6A3AF", underlineText: "#B58C97", quoteText: "#8CA5BF", shadow: "#101010", chatBg: "#FCFCF8", uiBg: "#F7F8F2", uiBorder: "#B9C5B0", userMesTint: "rgba(244,248,240,0.5)", aiMesTint: "rgba(255,248,250,0.5)", dialogueColor: "#2F372D", quoteHighlight: "rgba(233,204,214,0.4)" } },
-  { n: "🫐 블루베리 요거트", c: { mainText: "#3F4252", italicsText: "#A9A3D8", underlineText: "#8F97C4", quoteText: "#8F97C4", shadow: "#101010", chatBg: "#FBFBFD", uiBg: "#F3F4FA", uiBorder: "#C4C8DD", userMesTint: "rgba(243,244,250,0.5)", aiMesTint: "rgba(251,251,253,0.5)", dialogueColor: "#262838", quoteHighlight: "rgba(170,182,217,0.35)" } },
-];
 
 /* ───────── 상태 ───────── */
 let curColors = null, curName = "무드 축", curFont = FONTS[0], lockBlue = true;
-function readDNA() { const d = {}; document.querySelectorAll("#tg-axes input").forEach(i => d[i.dataset.k] = +i.value); return d; }
-function recompute() { curName = "무드 축"; render(engine(readDNA(), lockBlue)); }
 
 /* ───────── AI: 텍스트 → 축 ───────── */
 async function callAI(prompt) {
@@ -560,23 +561,6 @@ async function callAI(prompt) {
   } catch (e) { console.warn("[theme-gen] profile request failed, falling back:", e); }
   // 폴백: 현재 API로 quiet 생성
   return await ctx.generateQuietPrompt(prompt, false, false);
-}
-async function extractAxes(mood) {
-  const prompt = `다음 장면/무드를 색이 아니라 '무드 축' 6개로 분해해라. 각 0~100 정수.
-- temperature: 0=차갑다 ~ 100=따뜻하다
-- humidity: 0=건조/또렷 ~ 100=습하고 뿌옇다
-- brightness: 0=어둡다(다크) ~ 100=밝다(라이트)
-- saturation: 0=차분 ~ 100=선명
-- contrast: 0=부드럽다 ~ 100=또렷하다
-- fantasy: 0=현실 ~ 100=환상(보랏빛/비현실)
-장면: "${mood}"
-JSON만: {"temperature":..,"humidity":..,"brightness":..,"saturation":..,"contrast":..,"fantasy":..}`;
-  const text = await callAI(prompt);
-  const j = JSON.parse(String(text).replace(/```json|```/g, "").trim());
-  const map = { temp: j.temperature, humid: j.humidity, bright: j.brightness, sat: j.saturation, contrast: j.contrast, fantasy: j.fantasy };
-  document.querySelectorAll("#tg-axes input").forEach(i => { if (map[i.dataset.k] != null) i.value = clamp(map[i.dataset.k], 0, 100); });
-  updateEnds(); recompute();
-  toast(`축 추출됨 · 온${j.temperature} 습${j.humidity} 명${j.brightness} 채${j.saturation} 대${j.contrast} 환${j.fantasy}`);
 }
 
 /* ───────── 적용(주입) ───────── */
@@ -625,8 +609,6 @@ function paintPreview(c) {
   pv.querySelectorAll(".tg-q").forEach(q => { q.style.color = c.dialogueColor; q.style.background = c.quoteHighlight; q.style.fontFamily = curFont.css; });
 }
 
-const AXES = [["temp", "차가움", "따뜻함", 65], ["humid", "건조", "습함", 35], ["bright", "어두움", "밝음", 90], ["sat", "차분", "선명", 45], ["contrast", "부드러움", "또렷함", 50], ["fantasy", "현실", "환상", 20]];
-function updateEnds() { document.querySelectorAll("#tg-axes .tg-axis").forEach(ax => { const v = +ax.querySelector("input").value; ax.querySelector(".lo").classList.toggle("on", v < 45); ax.querySelector(".hi").classList.toggle("on", v > 55); }); }
 
 let toastTimer;
 function toast(msg) { const t = document.getElementById("tg-status"); if (!t) return; t.textContent = msg; clearTimeout(toastTimer); }
@@ -657,9 +639,6 @@ function renderLibrary() {
 
 /* ───────── 패널 UI ───────── */
 function panelHTML() {
-  const axes = AXES.map(([k, lo, hi, v]) => `<div class="tg-axis"><div class="tg-ends"><span class="lo">${lo}</span><span class="hi">${hi}</span></div><input type="range" min="0" max="100" value="${v}" data-k="${k}"></div>`).join("");
-  const fonts = FONTS.map((f, i) => `<button class="tg-pill" data-font="${i}">${f.n}</button>`).join("");
-  const presets = PRESETS.map((p, i) => `<button class="tg-pill" data-preset="${i}">${p.n}</button>`).join("");
   const SC_PRESETS = Object.keys(SCENE_PRESET);
   const objChips = SC_PRESETS.map(r => `<button class="tg-pill" data-scpreset="${r}">${r}</button>`).join("");
   return `
@@ -667,29 +646,27 @@ function panelHTML() {
     <div class="tg-bar"><b>🌧️ 테마 생성기</b> <span class="tg-ver">v${VERSION}</span> <span id="tg-close">✕</span></div>
 
     <div class="tg-tabs">
-      <button class="tg-tab on" data-tab="mood">🌧️ Mood</button>
-      <button class="tg-tab" data-tab="object">🌫️ Scene</button>
+      <button class="tg-tab on" data-tab="object">🌫️ Scene</button>
+      <button class="tg-tab" data-tab="mood">🌗 Mood</button>
     </div>
 
-    <div class="tg-pane" data-pane="mood">
-      <label class="tg-sw"><input type="checkbox" id="tg-ai-toggle"><span class="tg-track"></span><span>AI 연결 (텍스트 → 축 추출)</span></label>
-      <div id="tg-ai-row" class="tg-airow tg-hidden">
-        <input id="tg-mood" placeholder="장면을 적어 (예: 비 온 뒤 저녁, 젖은 도로)">
-        <button id="tg-extract">추출</button>
+    <div class="tg-pane tg-hidden" data-pane="mood">
+      <p class="tg-hint" style="margin-top:4px">Scene에서 만든 테마에 무드를 입힌다. 가운데 = 원본 유지. 양 끝으로 갈수록 강해짐.</p>
+
+      <p class="tg-label">무드 프리셋</p>
+      <div class="tg-pills" id="mood-presets">${MOOD_PRESETS.map((p, i) => `<button class="tg-pill" data-moodp="${i}">${p.n}</button>`).join("")}</div>
+
+      <div class="tg-harm" style="margin-top:14px">
+        <div class="tg-axis"><div class="tg-ends"><span>차갑게</span><span>따뜻하게</span></div><input type="range" id="mood-warm" min="-100" max="100" value="0"></div>
+        <div class="tg-axis"><div class="tg-ends"><span>어두움</span><span>밝음</span></div><input type="range" id="mood-bright" min="-100" max="100" value="0"></div>
+        <div class="tg-axis"><div class="tg-ends"><span>차분</span><span>선명</span></div><input type="range" id="mood-vivid" min="-100" max="100" value="0"></div>
+        <div class="tg-axis"><div class="tg-ends"><span>현실</span><span>몽환</span></div><input type="range" id="mood-dream" min="0" max="100" value="0"></div>
+        <button id="mood-reset" class="tg-reset">↺ 무드 리셋 (원본 테마로)</button>
       </div>
-
-      <p class="tg-label">디저트 프리셋</p>
-      <div class="tg-pills">${presets}</div>
-
-      <p class="tg-label">글꼴 (무드)</p>
-      <div class="tg-pills">${fonts}</div>
-
-      <p class="tg-label">무드 축</p>
-      <div id="tg-axes">${axes}</div>
-      <label class="tg-sw"><input type="checkbox" id="tg-lockblue" checked><span class="tg-track"></span><span>인용 = 차가운 블루</span></label>
     </div>
 
-    <div class="tg-pane tg-hidden" data-pane="object">
+    <div class="tg-pane" data-pane="object">
+      <label class="tg-sw"><input type="checkbox" id="tg-ai-toggle"><span class="tg-track"></span><span>AI 연결 (키워드 → 장면 생성)</span></label>
       <p class="tg-label">키워드 (띄어쓰기로)</p>
       <div class="tg-objrow">
         <input id="sc-keywords" placeholder="예: 청포도 여름 얼음 / 레몬 홍차 도서관" value="청포도 여름 얼음">
@@ -756,24 +733,33 @@ function wirePanel() {
   const p = document.getElementById("theme-gen-panel");
   p.querySelector("#tg-close").addEventListener("click", () => p.classList.add("tg-hidden"));
 
-  // AI 토글
+  // AI 토글 (Scene 장면 생성용)
   const aiToggle = p.querySelector("#tg-ai-toggle");
   aiToggle.checked = settings().aiInPanel;
-  p.querySelector("#tg-ai-row").classList.toggle("tg-hidden", !aiToggle.checked);
-  aiToggle.addEventListener("change", () => { settings().aiInPanel = aiToggle.checked; save(); p.querySelector("#tg-ai-row").classList.toggle("tg-hidden", !aiToggle.checked); });
-  p.querySelector("#tg-extract").addEventListener("click", async () => {
-    const m = p.querySelector("#tg-mood").value.trim(); if (!m) return;
-    p.querySelector("#tg-extract").disabled = true; toast("축 추출 중…");
-    try { await extractAxes(m); } catch (e) { toast("실패: " + e.message); } finally { p.querySelector("#tg-extract").disabled = false; }
+  aiToggle.addEventListener("change", () => { settings().aiInPanel = aiToggle.checked; save(); });
+
+  // 🌗 Mood 후처리: 현재 Scene 테마(themeBase)에 무드 변형
+  const readMood = () => ({
+    warm: (+p.querySelector("#mood-warm").value) / 100,
+    bright: (+p.querySelector("#mood-bright").value) / 100,
+    vivid: (+p.querySelector("#mood-vivid").value) / 100,
+    dream: (+p.querySelector("#mood-dream").value) / 100,
   });
-
-  // 프리셋 / 폰트
-  p.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => { const pr = PRESETS[+b.dataset.preset]; render(pr.c); curName = pr.n; toast(`프리셋 · ${pr.n}`); }));
-  p.querySelectorAll("[data-font]").forEach(b => b.addEventListener("click", () => { curFont = FONTS[+b.dataset.font]; sc.fontLocked = true; paintPreview(curColors); toast(`글꼴 고정 · ${curFont.tag} (Scene에서도 유지)`); }));
-
-  // 축 / 블루
-  p.querySelector("#tg-axes").addEventListener("input", () => { updateEnds(); recompute(); });
-  p.querySelector("#tg-lockblue").addEventListener("change", e => { lockBlue = e.target.checked; recompute(); });
+  const applyMood = () => { if (!sc.themeBase) { toast("먼저 Scene에서 테마를 만들어줘"); return; } render(moodTransform(sc.themeBase, readMood())); };
+  p.querySelectorAll("#mood-warm,#mood-bright,#mood-vivid,#mood-dream").forEach(s => s.addEventListener("input", applyMood));
+  p.querySelectorAll("[data-moodp]").forEach(b => b.addEventListener("click", () => {
+    const mp = MOOD_PRESETS[+b.dataset.moodp];
+    p.querySelector("#mood-warm").value = (mp.m.warm || 0) * 100;
+    p.querySelector("#mood-bright").value = (mp.m.bright || 0) * 100;
+    p.querySelector("#mood-vivid").value = (mp.m.vivid || 0) * 100;
+    p.querySelector("#mood-dream").value = (mp.m.dream || 0) * 100;
+    applyMood(); pulse(); toast(`무드 · ${mp.n}`);
+  }));
+  p.querySelector("#mood-reset")?.addEventListener("click", () => {
+    ["mood-warm", "mood-bright", "mood-vivid"].forEach(id => p.querySelector("#" + id).value = 0);
+    p.querySelector("#mood-dream").value = 0;
+    if (sc.themeBase) render(sc.themeBase); pulse(); toast("무드 리셋 — 원본 테마로");
+  });
 
   // 탭 전환
   p.querySelectorAll(".tg-tab").forEach(t => t.addEventListener("click", () => {
@@ -827,7 +813,7 @@ function wirePanel() {
   p.querySelector("#tg-copy").addEventListener("click", () => { if (!curColors) return; const o = {}; Object.keys(curColors).forEach(k => o[k] = fmtVal(curColors[k])); navigator.clipboard.writeText(JSON.stringify(o, null, 2)); toast("JSON 복사됨."); });
   p.querySelector("#tg-copycss").addEventListener("click", () => { if (!curColors) return; navigator.clipboard.writeText(`.mes_text q{ color:${fmtVal(curColors.dialogueColor)} !important; background:${fmtVal(curColors.quoteHighlight)} !important; }`); toast("커스텀 CSS 복사됨."); });
 
-  updateEnds(); recompute(); renderLibrary();
+  sceneBuild(); renderLibrary();
 }
 
 function openPanel() {

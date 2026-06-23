@@ -2,7 +2,7 @@
  *
  * Mood Mode: 무드 축(온도/습도/밝기/채도/대비/환상) → 결정론적 엔진 → 12슬롯 팔레트.
  * AI는 옵션(텍스트 → 축 추출만). 색은 항상 엔진이 계산.
- * Object Mode(소재 기반)는 다음 베타에서.
+ * Object Mode: 소재 = 색상 범위 → 추출 → 밴드 하모나이저 → 무드 판정 → 형광펜 4타입. 다이스로 매번 다른 서사.
  *
  * ⚠ ST API 경로/호출은 버전에 따라 다를 수 있음. 아래 [VERIFY] 주석 지점만 확인하면 됨.
  */
@@ -12,7 +12,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 
 const MODULE = "themeGen";
-const VERSION = "0.1.0-beta";
+const VERSION = "0.2.0-beta";
 
 const defaultSettings = {
   enabled: true,
@@ -90,6 +90,155 @@ function guard(c) {
   let mc = parseColor(out.mainText); let g = 0; while (contrast(mc, bg) < 6 && g < 60) { let { h, s, l } = rgbToHsl(mc.r, mc.g, mc.b); l = light ? Math.max(0, l - 0.02) : Math.min(1, l + 0.02); mc = { ...hslToRgb(h, s, l), a: mc.a }; g++; } out.mainText = toRgba(mc);
   ["userMesTint", "aiMesTint"].forEach(k => { const p = parseColor(out[k]); if (p.a > 0.45) p.a = 0.45; out[k] = toRgba(p); });
   return out;
+}
+
+/* ───────── Object 모드: 소재 범위 → 추출 → 하모나이저 → 무드 → 형광펜 ───────── */
+const RANGES = {
+  "말차":{hue:[78,98],sat:[.20,.40],light:[.55,.72]},"녹차":{hue:[78,98],sat:[.20,.40],light:[.55,.72]},
+  "딸기":{hue:[342,358],sat:[.45,.68],light:[.60,.74]},"베리":{hue:[330,350],sat:[.40,.62],light:[.45,.62]},
+  "크림":{hue:[36,48],sat:[.18,.34],light:[.88,.96]},"우유":{hue:[40,60],sat:[.06,.16],light:[.90,.97]},
+  "블루베리":{hue:[225,250],sat:[.28,.46],light:[.45,.62]},
+  "라벤더":{hue:[255,278],sat:[.25,.45],light:[.62,.78]},"보라":{hue:[265,290],sat:[.30,.52],light:[.50,.68]},
+  "복숭아":{hue:[14,30],sat:[.45,.68],light:[.70,.84]},"코랄":{hue:[8,22],sat:[.55,.75],light:[.62,.74]},
+  "레몬":{hue:[48,58],sat:[.45,.70],light:[.60,.78]},"버터":{hue:[42,52],sat:[.30,.50],light:[.72,.86]},"꿀":{hue:[34,44],sat:[.45,.65],light:[.55,.70]},
+  "민트":{hue:[140,165],sat:[.22,.42],light:[.66,.80]},"세이지":{hue:[80,105],sat:[.14,.30],light:[.62,.76]},
+  "갈색":{hue:[22,38],sat:[.30,.55],light:[.26,.42]},"우드":{hue:[24,40],sat:[.28,.48],light:[.34,.50]},"초콜릿":{hue:[18,32],sat:[.30,.50],light:[.18,.30]},
+  "남색":{hue:[210,230],sat:[.40,.65],light:[.24,.40]},"네이비":{hue:[210,230],sat:[.40,.65],light:[.24,.40]},"바다":{hue:[190,215],sat:[.35,.55],light:[.36,.52]},
+  "잔디":{hue:[95,120],sat:[.35,.55],light:[.36,.52]},"잔디색":{hue:[95,120],sat:[.35,.55],light:[.36,.52]},"숲":{hue:[110,140],sat:[.30,.50],light:[.28,.44]},"녹색":{hue:[100,130],sat:[.35,.55],light:[.38,.55]},
+  "노을":{hue:[8,38],sat:[.45,.78],light:[.52,.72]},"하늘":{hue:[200,220],sat:[.30,.50],light:[.66,.82]},"서리":{hue:[195,225],sat:[.06,.18],light:[.80,.92]},
+  "장미":{hue:[340,355],sat:[.40,.62],light:[.45,.62]},"와인":{hue:[338,352],sat:[.40,.60],light:[.26,.40]},
+  "먹구름":{hue:[205,255],sat:[.10,.32],light:[.32,.62]},
+  "달빛":{hue:[250,275],sat:[.20,.38],light:[.66,.82]},"밤":{hue:[230,255],sat:[.25,.45],light:[.20,.34]},
+};
+const ALIAS = {matcha:"말차",strawberry:"딸기",cream:"크림",milk:"우유",blueberry:"블루베리",lavender:"라벤더",peach:"복숭아",lemon:"레몬",mint:"민트",brown:"갈색",navy:"남색",grass:"잔디",sunset:"노을",rose:"장미",moonlight:"달빛"};
+const rnd = (a, b) => a + Math.random() * (b - a);
+const sampleRange = r => ({ h: rnd(r.hue[0], r.hue[1]), s: rnd(r.sat[0], r.sat[1]), l: rnd(r.light[0], r.light[1]) });
+const tokenize = str => str.split(/[\s,/]+/).map(t => t.trim()).filter(Boolean);
+
+// 밴드 하모나이저: 채도=좁은 밴드(톤 통일), 명도=순위보존 밴드(개성 유지, 한 점 수렴 금지)
+function harmonizeBand(hexes, strength) {
+  const S = strength / 100, C = 0.35, Hf = 0.05, Lmin = 0.50, Lmax = 0.80;
+  const hsl = hexes.map(hx => { const p = parseColor(hx); return rgbToHsl(p.r, p.g, p.b); });
+  const order = hsl.map((c, i) => ({ i, l: c.l })).sort((a, b) => a.l - b.l);
+  const rk = {}; order.forEach((o, idx) => rk[o.i] = hsl.length > 1 ? idx / (hsl.length - 1) : 0.5);
+  return hsl.map((c, i) => {
+    const st = clamp(c.s, C - Hf, C + Hf);
+    return { h: c.h * 360, s: lerp(c.s, st, S), l: lerp(c.l, lerp(Lmin, Lmax, rk[i]), S) };
+  });
+}
+// 가중 역할 배정 (고정 X, 조화로운 방향으로 순환)
+function assignRoles(srcs) {
+  const jit = () => rnd(-0.06, 0.06);
+  const bgS = srcs.map(c => c.l + jit()), txtS = srcs.map(c => (1 - c.l) + jit()), ptS = srcs.map(c => c.s + jit());
+  const bg = bgS.indexOf(Math.max(...bgS));
+  let txt = txtS.indexOf(Math.max(...txtS)); if (txt === bg) { const t = [...txtS]; t[bg] = -9; txt = t.indexOf(Math.max(...t)); }
+  let pt = ptS.indexOf(Math.max(...ptS)); if (pt === bg || pt === txt) { const t = [...ptS]; t[bg] = -9; t[txt] = -9; pt = t.indexOf(Math.max(...t)); }
+  const used = new Set([bg, txt, pt]); let second = srcs.findIndex((_, i) => !used.has(i)); if (second < 0) second = txt;
+  return { bg, txt, pt, second };
+}
+// 무드 판정 → 형광펜 타입 + 폰트 (색 분포 기반, AI 없이). 다이스마다 재판정 = 다양성.
+function judgeMood(srcs) {
+  const avgS = srcs.reduce((a, c) => a + c.s, 0) / srcs.length;
+  const avgL = srcs.reduce((a, c) => a + c.l, 0) / srcs.length;
+  const maxS = Math.max(...srcs.map(c => c.s));
+  const warm = srcs.filter(c => c.h < 60 || c.h > 330).length / srcs.length;
+  const cool = srcs.filter(c => c.h >= 180 && c.h <= 285).length / srcs.length;
+  if (avgS > 0.55 || (maxS > 0.75 && avgL < 0.6)) return { mood: "Neon", hl: "Neon", font: "cyber" };
+  if (warm >= 0.5 && avgS >= 0.30 && avgS <= 0.55 && avgL >= 0.42 && avgL <= 0.66) return { mood: "Vintage", hl: "Vintage", font: "literary" };
+  if (cool >= 0.4 || avgL < 0.5) return { mood: "Melancholy", hl: "Dialogue", font: "literary" };
+  return { mood: "Cozy", hl: "Romantic", font: "cozy" };
+}
+// 형광펜 4타입: 진한 씨앗색을 배경에 타되, 타입마다 배경비율·글자 다름
+function makeHighlight(type, point, mainHex, bgHex) {
+  const seed = hslToRgb(((point.h % 360) + 360) % 360 / 360, Math.max(point.s, 0.5), 0.55), bg = parseColor(bgHex);
+  const mixc = w => toRgba({ r: seed.r * w + bg.r * (1 - w), g: seed.g * w + bg.g * (1 - w), b: seed.b * w + bg.b * (1 - w), a: 0.72 });
+  switch (type) {
+    case "Dialogue": return { bg: mixc(0.20), txt: mainHex };
+    case "Vintage": return { bg: mixc(0.15), txt: H(point.h, point.s * 0.7, 0.30) };
+    case "Neon": return { bg: mixc(0.38), txt: H(point.h, Math.min(point.s + 0.2, 1), 0.28) };
+    default: return { bg: mixc(0.18), txt: H(point.h, point.s, 0.40) }; // Romantic
+  }
+}
+// 무드별 폰트 tag → FONTS 매핑
+function fontByTag(tag) { return FONTS.find(f => f.tag === tag) || FONTS[3]; }
+
+// Object 상태
+let objTokens = [], objSources = [], objRoles = null, objMood = { mood: "Cozy", hl: "Romantic", font: "cozy" };
+
+async function objResolve(tokens) {
+  const out = [], missing = [];
+  for (const t of tokens) {
+    const key = ALIAS[t.toLowerCase()] || t;
+    if (RANGES[key]) out.push({ token: t, range: RANGES[key], from: "사전" });
+    else if (/^#?[0-9a-f]{3,6}$/i.test(t)) { const p = parseColor(t[0] === "#" ? t : "#" + t); const c = rgbToHsl(p.r, p.g, p.b); out.push({ token: t, range: { hue: [c.h * 360, c.h * 360], sat: [c.s, c.s], light: [c.l, c.l] }, from: "직접" }); }
+    else { out.push({ token: t, range: null, from: "AI" }); missing.push(t); }
+  }
+  if (missing.length && settings().aiInPanel) {
+    try {
+      const prompt = `각 소재를 색 하나가 아니라 '색상 범위'로. 같은 소재도 상황 따라 다르니 hue(0-360)/sat(0-1)/light(0-1)를 [min,max]로.
+소재: ${missing.join(", ")}
+JSON만: {"소재명":{"hue":[min,max],"sat":[min,max],"light":[min,max]}, ...}`;
+      const text = await callAI(prompt);
+      const j = JSON.parse(String(text).replace(/```json|```/g, "").trim());
+      out.forEach(o => { if (!o.range && j[o.token]) o.range = j[o.token]; });
+    } catch (e) { toast("AI 추출 실패: " + e.message); }
+  }
+  out.forEach(o => { if (!o.range) o.range = { hue: [40, 50], sat: [.05, .12], light: [.55, .65] }; });
+  return out;
+}
+
+// 🎲 한 판: 범위 추출 + 역할 + 무드 재판정 (다이스/생성이 호출)
+function objRoll() {
+  if (!objTokens.length) return;
+  objSources = objTokens.map(tk => { const c = sampleRange(tk.range); return { token: tk.token, from: tk.from, h: c.h, s: c.s, l: c.l, hex: H(c.h, c.s, c.l) }; });
+  objRoles = assignRoles(objSources);
+  objMood = judgeMood(objSources);
+  curFont = fontByTag(objMood.font);     // 무드 → 폰트 자동
+  objRenderSources();
+  objBuildPalette();
+}
+
+// 하모나이저(추출색만) + 역할 고정 → 12슬롯. 슬라이더가 이걸 재호출(역할 안 바뀜).
+function objBuildPalette() {
+  if (!objSources.length || !objRoles) return;
+  const strength = +(document.getElementById("tg-harm")?.value ?? 85);
+  const harm = harmonizeBand(objSources.map(s => s.hex), strength);
+  const lightest = harm[objRoles.bg], deepest = harm[objRoles.txt], point = harm[objRoles.pt], second = harm[objRoles.second];
+
+  const chatBg = H(lightest.h, clamp(lightest.s * 0.4, 0, 0.10), 0.975);
+  const uiBg = H(lightest.h, clamp(lightest.s * 0.45, 0, 0.12), 0.955);
+  const uiBorder = H(second.h, clamp(second.s * 0.5, 0.1, 0.3), 0.78);
+  const baseMain = H(deepest.h, clamp(deepest.s * 0.4, 0.04, 0.18), 0.22);
+  const italicsText = H(point.h, point.s, point.l);
+  const underlineText = H(second.h, second.s * 0.8, point.l * 0.97);
+  const quoteText = H(212, 0.30, 0.64);
+  const hl = makeHighlight(objMood.hl, point, baseMain, chatBg);
+  const quoteHighlight = hl.bg;
+  const dialogueColor = hl.txt;
+  const shadow = "rgba(14,14,18,0.45)";
+  const userMesTint = H(point.h, 0.20, 0.95, 0.4);
+  const aiMesTint = H(lightest.h, 0.22, 0.97, 0.4);
+
+  let c = { mainText: baseMain, italicsText, underlineText, quoteText, shadow, chatBg, uiBg, uiBorder, userMesTint, aiMesTint, dialogueColor, quoteHighlight };
+  let mc = parseColor(c.mainText), bg = parseColor(c.chatBg), g = 0;
+  while (contrast(mc, bg) < 6 && g < 60) { const h = rgbToHsl(mc.r, mc.g, mc.b); mc = { ...hslToRgb(h.h, h.s, Math.max(0, h.l - 0.02)), a: 1 }; g++; }
+  c.mainText = toRgba(mc);
+  curName = `🍵 ${objTokens.map(t => t.token).join(" ")} · ${objMood.mood}`;
+  const badge = document.getElementById("tg-obj-badge"); if (badge) badge.textContent = `Mood: ${objMood.mood} · 형광펜 ${objMood.hl} · 폰트 ${objMood.font}`;
+  render(c);
+}
+function objRenderSources() {
+  const box = document.getElementById("tg-obj-sources"); if (!box) return; box.innerHTML = "";
+  objSources.forEach(s => { const el = document.createElement("div"); el.className = "tg-src"; el.innerHTML = `<span class="tg-srcdot" style="background:${s.hex}"></span>${s.token} <span class="tg-srcfrom">${s.from}</span>`; box.appendChild(el); });
+}
+async function objBuild() {
+  const tokens = tokenize(document.getElementById("tg-obj-input").value);
+  if (!tokens.length) return;
+  toast("소스 색 확보 중…");
+  objTokens = await objResolve(tokens);
+  objRoll();
+  const ai = objTokens.filter(t => t.from === "AI").length;
+  toast(`완료 · 소재 ${objTokens.length}개 (사전 ${objTokens.filter(t => t.from === "사전").length}, AI ${ai}) · 🎲로 다른 서사`);
 }
 
 /* ───────── 메타데이터 ───────── */
@@ -243,25 +392,53 @@ function panelHTML() {
   const axes = AXES.map(([k, lo, hi, v]) => `<div class="tg-axis"><div class="tg-ends"><span class="lo">${lo}</span><span class="hi">${hi}</span></div><input type="range" min="0" max="100" value="${v}" data-k="${k}"></div>`).join("");
   const fonts = FONTS.map((f, i) => `<button class="tg-pill" data-font="${i}">${f.n}</button>`).join("");
   const presets = PRESETS.map((p, i) => `<button class="tg-pill" data-preset="${i}">${p.n}</button>`).join("");
+  const OBJ_RECIPES = ["먹구름 노을 서리", "말차 딸기 크림", "블루베리 우유 크림", "라벤더 달빛 밤", "복숭아 크림 하늘", "레몬 버터 꿀", "와인 먹구름 서리", "갈색 남색 잔디"];
+  const objChips = OBJ_RECIPES.map(r => `<button class="tg-pill" data-objrecipe="${r}">${r}</button>`).join("");
   return `
   <div id="tg-panel-inner">
     <div class="tg-bar"><b>🌧️ 테마 생성기</b> <span class="tg-ver">v${VERSION}</span> <span id="tg-close">✕</span></div>
 
-    <label class="tg-sw"><input type="checkbox" id="tg-ai-toggle"><span class="tg-track"></span><span>AI 연결 (텍스트 → 축 추출)</span></label>
-    <div id="tg-ai-row" class="tg-airow tg-hidden">
-      <input id="tg-mood" placeholder="장면을 적어 (예: 비 온 뒤 저녁, 젖은 도로)">
-      <button id="tg-extract">추출</button>
+    <div class="tg-tabs">
+      <button class="tg-tab on" data-tab="mood">🌧️ Mood</button>
+      <button class="tg-tab" data-tab="object">🍵 Object</button>
     </div>
 
-    <p class="tg-label">디저트 프리셋</p>
-    <div class="tg-pills">${presets}</div>
+    <div class="tg-pane" data-pane="mood">
+      <label class="tg-sw"><input type="checkbox" id="tg-ai-toggle"><span class="tg-track"></span><span>AI 연결 (텍스트 → 축 추출)</span></label>
+      <div id="tg-ai-row" class="tg-airow tg-hidden">
+        <input id="tg-mood" placeholder="장면을 적어 (예: 비 온 뒤 저녁, 젖은 도로)">
+        <button id="tg-extract">추출</button>
+      </div>
 
-    <p class="tg-label">글꼴 (무드)</p>
-    <div class="tg-pills">${fonts}</div>
+      <p class="tg-label">디저트 프리셋</p>
+      <div class="tg-pills">${presets}</div>
 
-    <p class="tg-label">무드 축</p>
-    <div id="tg-axes">${axes}</div>
-    <label class="tg-sw"><input type="checkbox" id="tg-lockblue" checked><span class="tg-track"></span><span>인용 = 차가운 블루</span></label>
+      <p class="tg-label">글꼴 (무드)</p>
+      <div class="tg-pills">${fonts}</div>
+
+      <p class="tg-label">무드 축</p>
+      <div id="tg-axes">${axes}</div>
+      <label class="tg-sw"><input type="checkbox" id="tg-lockblue" checked><span class="tg-track"></span><span>인용 = 차가운 블루</span></label>
+    </div>
+
+    <div class="tg-pane tg-hidden" data-pane="object">
+      <p class="tg-label">소재 / 색 (띄어쓰기로)</p>
+      <div class="tg-objrow">
+        <input id="tg-obj-input" placeholder="예: 먹구름 노을 서리 / 말차 딸기 크림" value="먹구름 노을 서리">
+        <button id="tg-obj-build">생성</button>
+      </div>
+      <p class="tg-hint">소재 = 색상 범위. 매번 다르게 추출돼서 같은 입력도 다른 서사. 🎲로 다시 굴려.</p>
+
+      <p class="tg-label" style="display:flex;align-items:center;gap:8px">소스 색 <button id="tg-obj-dice">🎲 다시 뽑기</button> <span id="tg-obj-badge" class="tg-objbadge"></span></p>
+      <div class="tg-sources" id="tg-obj-sources"></div>
+
+      <div class="tg-harm">
+        <div class="tg-harmtop"><span>어우러짐 강도</span><span id="tg-harm-v">85</span></div>
+        <input type="range" id="tg-harm" min="0" max="100" value="85">
+        <div class="tg-harmend"><span>날것</span><span>한 가족</span></div>
+      </div>
+      <div class="tg-objchips">${objChips}</div>
+    </div>
 
     <div id="tg-status" class="tg-status">　</div>
 
@@ -308,6 +485,21 @@ function wirePanel() {
   // 축 / 블루
   p.querySelector("#tg-axes").addEventListener("input", () => { updateEnds(); recompute(); });
   p.querySelector("#tg-lockblue").addEventListener("change", e => { lockBlue = e.target.checked; recompute(); });
+
+  // 탭 전환
+  p.querySelectorAll(".tg-tab").forEach(t => t.addEventListener("click", () => {
+    p.querySelectorAll(".tg-tab").forEach(x => x.classList.toggle("on", x === t));
+    const tab = t.dataset.tab;
+    p.querySelectorAll(".tg-pane").forEach(pane => pane.classList.toggle("tg-hidden", pane.dataset.pane !== tab));
+    if (tab === "object" && !objTokens.length) objBuild();   // 첫 진입 시 자동 생성(랜덤)
+  }));
+
+  // Object 모드
+  p.querySelector("#tg-obj-build").addEventListener("click", objBuild);
+  p.querySelector("#tg-obj-input").addEventListener("keydown", e => { if (e.key === "Enter") objBuild(); });
+  p.querySelector("#tg-obj-dice").addEventListener("click", objRoll);
+  p.querySelector("#tg-harm").addEventListener("input", e => { p.querySelector("#tg-harm-v").textContent = e.target.value; if (objSources.length) objBuildPalette(); });
+  p.querySelectorAll("[data-objrecipe]").forEach(b => b.addEventListener("click", () => { p.querySelector("#tg-obj-input").value = b.dataset.objrecipe; objBuild(); }));
 
   // 수동 편집
   const grid = p.querySelector("#tg-grid");
